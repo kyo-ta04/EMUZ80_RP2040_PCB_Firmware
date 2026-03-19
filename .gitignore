@@ -1,0 +1,15 @@
+# Build output
+build*/
+.cache/*
+.agents/
+
+# VS Code settings
+.vscode/
+
+# Compiled files
+#*.uf2
+*.elf
+*.bin
+*.hex
+*.map
+*.dis
