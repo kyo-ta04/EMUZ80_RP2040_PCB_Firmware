@@ -1,7 +1,10 @@
 # EMUZ80_RP2040_PCB_Firmware
 ![img1](./img/img1.jpg)
-@tendai22plus氏作の [EMUZ80_RP2040_PCB](https://github.com/tendai22plus/EMUZ80_RP2040_PCB) 基板用のファームウェアです。　EMUZ80_RP2040は実物の Z80 CPU を RP2040 または RP2350 搭載ボードで動かすための周辺回路・バスエミュレータです。
+@tendai22plus氏作の [EMUZ80_RP2040_PCB](https://github.com/tendai22/EMUZ80_RP2040_PCB) 基板用のファームウェアです。  
+EMUZ80_RP2040は実物の Z80 CPU を RP2040 または RP2350 搭載ボードで動かすための周辺回路・バスエミュレータ。 
 ソフトウェアでCPU自体をエミュレーションするのではなく、RP2040/RP2350 の PIO (プログラマブル I/O) サブシステムを利用してメモリや I/O デバイスをエミュレートし、本物の Z80 マイクロプロセッサを動作させます。
+
+github -> https://github.com/tendai22/EMUZ80_RP2040_PCB
 
 ## 対応RP2040/RP2350ボード
 - AE-RP2040_EMUZ80 (秋月電子 AE-RP2040)
@@ -11,7 +14,7 @@
 ### ビルド済み UF2 ファイル
 すぐに書き込んで試せるUF2ファイルをプロジェクトルートに用意しています。
 - `EMUZ80_RP2040_xxMHz.uf2` — 秋月電子 AE-RP2040 用 （xxMHz=Z80の動作クロック）
-(*** 現在、RP2350A/RP2350B は順次追加していく予定です ***) 
+- ** RP2350A/RP2350B は順次追加していく予定です **
 
 ## 通信端末ソフトの注意
 
