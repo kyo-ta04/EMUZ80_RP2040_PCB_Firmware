@@ -329,8 +329,8 @@ int main() {
   // int Z80_freq = 8000000; // 8MHz
   // int Z80_freq = 7000000; // 7MHz
   // int Z80_freq = 6000000; // 6MHz
-  int Z80_freq = 4000000; // 4MHz
-  // int Z80_freq = 2500000; // 2.5MHz
+  // int Z80_freq = 4000000; // 4MHz
+  int Z80_freq = 2500000; // 2.5MHz
   // int Z80_freq = 20; // 20Hz
   gpio_set_function(CLK_PIN, GPIO_FUNC_PWM);
   uint slice_num = pwm_gpio_to_slice_num(CLK_PIN);
