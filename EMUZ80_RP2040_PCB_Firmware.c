@@ -246,12 +246,15 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
 //
 int main() {
   uint32_t sysclk = clock_get_hz(clk_sys);
+  int sysvolt = VREG_VOLTAGE_1_15;
 
-  if (false) { // 高速 コア電圧1.3V クロック 400MHz 設定
+  if (false) { // 高速 コア電圧1.3V クロック 360/400MHz 設定
     sleep_ms(100);
-    vreg_set_voltage(VREG_VOLTAGE_1_30);
+    sysvolt = VREG_VOLTAGE_1_30;
+    vreg_set_voltage(sysvolt);
     sleep_ms(100);
-    sysclk = 400000;
+    // sysclk = 400000;
+    sysclk = 360000;
     if (set_sys_clock_khz(sysclk, true)) {
 #if PICO_RP2040
       ssi_hw->baudr = 3; // 400MHz / 3 = 133MHz
@@ -259,7 +262,9 @@ int main() {
     }
   } else { // 標準　コア電圧 1.15V クロック 200MHz 設定
     sleep_ms(100);
-    vreg_set_voltage(VREG_VOLTAGE_1_15);
+    //    vreg_set_voltage(VREG_VOLTAGE_1_15);
+    sysvolt = VREG_VOLTAGE_1_15;
+    vreg_set_voltage(sysvolt);
     sleep_ms(100);
     sysclk = 200000;
     if (set_sys_clock_khz(sysclk, true)) {
@@ -275,7 +280,6 @@ int main() {
 
   // Z80用メモリー初期化
   memset(memory, 0xFF, MEMORY_SIZE);
-  //  memcpy(memory, rom_basic, sizeof(rom_basic));
   memcpy(memory, emuz80_binary, sizeof(emuz80_binary));
 
   // GPIO初期化 GP0-29
@@ -298,23 +302,26 @@ int main() {
   // PIO初期化
   pio_init_bus();
 
-  sleep_ms(1000);
+  sleep_ms(2000);
   // EMUZ80_RP2040_PCB
   printf("\n** For EMUZ80_RP2040_PCB! **\n");
   printf("** ROM-DATA: EMUBASIC_IO  **\n");
   printf("\n-hit [Enter] in terminal-\n");
   while (getchar_timeout_us(100) == PICO_ERROR_TIMEOUT)
     ;
+  float volt = 0;
+  if (sysvolt == VREG_VOLTAGE_1_15)
+    volt = 1.15;
+  if (sysvolt == VREG_VOLTAGE_1_30)
+    volt = 1.30;
 
   //  エミュレーション開始(core1)
-  printf("\nAE-RP2040 Core:1.15V Clock:200MHz\n");
-  // printf("\nAE-RP2040 Core:1.3V Clock:360MHz\n");
-  // printf("\nAE-RP2040 Core:1.3V Clock:400MHz\n");
+  printf("\nAE-RP2040 Core:%0.2fV Clock:%dMHz\n", volt, sysclk / 1000);
   printf("Emulation task(core1) Start..\n");
   multicore_launch_core1(emu_loop);
   sleep_ms(1000);
 
-  // CLK PWM Setup , RP2040 400MHz Z80 11MHz, 360MHz 6MHz, 200MHz 4MHz
+  // CLK PWM Setup ,  MAX RP2040 400MHz Z80 11MHz
   // int Z80_freq = 12000000; // 12MHz
   // int Z80_freq = 11000000; // 11MHz
   // int Z80_freq = 10000000; // 10MHz

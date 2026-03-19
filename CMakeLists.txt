@@ -59,12 +59,14 @@ target_include_directories(EMUZ80_RP2040_PCB_Firmware PRIVATE
 # Add any user requested libraries
 target_link_libraries(EMUZ80_RP2040_PCB_Firmware 
         hardware_pio
+        hardware_timer
         hardware_pwm
-        hardware_clocks
-        hardware_vreg
-        hardware_sync
         pico_multicore
         )
 
 pico_add_extra_outputs(EMUZ80_RP2040_PCB_Firmware)
+
+# 400MHz Overclock Optimizations
+pico_set_binary_type(EMUZ80_RP2040_PCB_Firmware copy_to_ram)
+target_compile_options(EMUZ80_RP2040_PCB_Firmware PRIVATE -O3)
 
