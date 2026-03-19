@@ -1,8 +1,9 @@
-// EMUZ80_RP2040_PCB_Firmware: Z80 bus emulator for Akizuki AE-RP2040
+// EMUZ80_RP2040_PCB_Firmware: Z80 bus emulator for Waveshare RP2350-Zero
 // ** For EMUZ80_RP2040_PCB! **
 // ** ROM-DATA: EMUBASIC_IO  **
 
-#include "AE-RP2040.pio.h"
+// #include "AE-RP2040.pio.h"
+#include "RP2350-Zero.pio.h"
 #include "hardware/clocks.h"
 #include "hardware/pio.h"
 #include "hardware/pwm.h"
@@ -93,26 +94,33 @@ void set_pwm_freq(uint pin, uint32_t freq) {
   pwm_set_gpio_level(pin, (wrap + 1) / 2);
 }
 
-uint sm_trg = 0;
+// PIO0
 uint sm_emu = 1;
 uint sm_dirsL = 2;
 uint sm_dirsH = 3;
 
+// PIO1
+// uint sm_trg2 = 0;
+uint sm_trg_RD = 0;
+uint sm_trg_WR = 1;
+
 // --- PIO Helpers ---
 void pio_init_bus() {
   PIO pio = pio0;
+  PIO pio_1 = pio1;
 
-  // SM0: trg_rw2 (Detection of falling edge on RD/WR)
-  uint offset_trg = pio_add_program(pio, &trg_rw2_program);
-  pio_sm_config c_trg = trg_rw2_program_get_default_config(offset_trg);
+  // PIO1 - SM0/1: trg_pin (Detection of falling edge on RD/WR)
+  uint offset_trg = pio_add_program(pio_1, &trg_pin_program);
+  pio_sm_config c_trg_RD = trg_pin_program_get_default_config(offset_trg);
+  pio_sm_config c_trg_WR = trg_pin_program_get_default_config(offset_trg);
 
-  // SM1: m_emu (Address/Data handling)
+  // PIO0 - SM0: m_emu (Address/Data handling)
   uint offset_emu = pio_add_program(pio, &m_emu_program);
   pio_sm_config c_emu = m_emu_program_get_default_config(offset_emu);
 
-  // SM2/3: d_pindirs (Direction toggle)
+  // PIO0 - SM1/2: d_pindirs (Direction toggle)
   uint offset_dirs = pio_add_program(pio, &d_pindirs_program);
-  pio_sm_config c_dirs = d_pindirs_program_get_default_config(offset_dirs);
+  pio_sm_config c_dirsL = d_pindirs_program_get_default_config(offset_dirs);
   pio_sm_config c_dirsH = d_pindirs_program_get_default_config(offset_dirs);
 
   // GPIOをPIO用に初期化 GP0-15(A0-15), GP16-23(D0-7), GP24(MREQ/IORQ),
@@ -126,15 +134,19 @@ void pio_init_bus() {
   pio_gpio_init(pio, WR_PIN);   // GP26(WR)
   //  pio_gpio_init(pio, WAIT_PIN); // GP27(WAIT)
 
-  // SM0: trg_rw2 (Detection of falling edge on RD/WR)
-  sm_config_set_in_pins(&c_trg, RD_PIN); // base = GP25 (RD, WR)
-  pio_sm_init(pio, sm_trg, offset_trg, &c_trg);
-  pio_sm_set_enabled(pio, sm_trg, true);
+  // PIO1 SM0/1: trg_pin (Detection of falling edge on RD/WR)
+  sm_config_set_in_pins(&c_trg_RD, RD_PIN); // base = GP25 (RD)
+  pio_sm_init(pio_1, sm_trg_RD, offset_trg, &c_trg_RD);
+  pio_sm_set_enabled(pio_1, sm_trg_RD, true);
 
-  // SM1: m_emu (Address/Data handling)
+  sm_config_set_in_pins(&c_trg_WR, WR_PIN); // base = GP26 (WR)
+  pio_sm_init(pio_1, sm_trg_WR, offset_trg, &c_trg_WR);
+  pio_sm_set_enabled(pio_1, sm_trg_WR, true);
+
+  // PIO0 - SM0: m_emu (Address/Data handling)
   sm_config_set_in_pins(&c_emu, 0);             // base = GP0
   sm_config_set_out_pins(&c_emu, DATA_BASE, 8); // base = GP16, cnt = 8
-  sm_config_set_jmp_pin(&c_emu, RD_PIN);
+  sm_config_set_jmp_pin(&c_emu, RD_PIN);        // GP25 (RD)
 
   // D0-7ピン初期化(入力)
   pio_sm_set_consecutive_pindirs(pio, sm_emu, DATA_BASE, 8, false);
@@ -147,16 +159,15 @@ void pio_init_bus() {
   pio_sm_init(pio, sm_emu, offset_emu, &c_emu);
   pio_sm_set_enabled(pio, sm_emu, true);
 
-  // SM2/3: d_pindirs (Direction toggle)
-  sm_config_set_set_pins(&c_dirs, DATA_BASE, 4); // GP0..3
-  sm_config_set_jmp_pin(&c_dirs, RD_PIN);
-  pio_sm_init(pio, sm_dirsL, offset_dirs, &c_dirs);
-
-  sm_config_set_set_pins(&c_dirsH, DATA_BASE + 4, 4); // GP4..7
-  sm_config_set_jmp_pin(&c_dirsH, RD_PIN);
-  pio_sm_init(pio, sm_dirsH, offset_dirs, &c_dirsH);
-
+  // PIO0 - SM1/2: d_pindirs (Direction toggle)
+  sm_config_set_set_pins(&c_dirsL, DATA_BASE, 4); // GP16..19
+  sm_config_set_jmp_pin(&c_dirsL, RD_PIN);        // GP25 (RD)
+  pio_sm_init(pio, sm_dirsL, offset_dirs, &c_dirsL);
   pio_sm_set_enabled(pio, sm_dirsL, true);
+
+  sm_config_set_set_pins(&c_dirsH, DATA_BASE + 4, 4); // GP20..23
+  sm_config_set_jmp_pin(&c_dirsH, RD_PIN);            // GP25 (RD)
+  pio_sm_init(pio, sm_dirsH, offset_dirs, &c_dirsH);
   pio_sm_set_enabled(pio, sm_dirsH, true);
 }
 
@@ -241,10 +252,18 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
   }
 }
 
+// QSPIクロックを調整する関数
+void set_qspi_clock_divider(uint32_t sys_clock_khz, uint32_t qspi_max_khz) {
+  uint32_t divider = (sys_clock_khz + qspi_max_khz - 1) / qspi_max_khz;
+  clock_configure(clk_peri, 0, CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_CLKSRC_PLL_SYS,
+                  sys_clock_khz * 1000, sys_clock_khz * 1000 / divider);
+}
+
 //
 //  メイン関数
 //
 int main() {
+  sleep_ms(100);
   uint32_t sysclk = clock_get_hz(clk_sys);
   int sysvolt = VREG_VOLTAGE_1_15;
 
@@ -255,27 +274,12 @@ int main() {
     sleep_ms(100);
     // sysclk = 400000;
     sysclk = 360000;
-    if (set_sys_clock_khz(sysclk, true)) {
-#if PICO_RP2040
-      ssi_hw->baudr = 3; // 400MHz / 3 = 133MHz
-#endif
-    }
-  } else { // 標準　コア電圧 1.15V クロック 200MHz 設定
+    set_sys_clock_khz(sysclk, true);
+    set_qspi_clock_divider(sysclk, 133000); // QSPIクロックを133MHz以下に
     sleep_ms(100);
-    //    vreg_set_voltage(VREG_VOLTAGE_1_15);
-    sysvolt = VREG_VOLTAGE_1_15;
-    vreg_set_voltage(sysvolt);
-    sleep_ms(100);
-    sysclk = 200000;
-    if (set_sys_clock_khz(sysclk, true)) {
-#if PICO_RP2040
-      ssi_hw->baudr = 2; // 200MHz / 2 = 100MHz
-#endif
-    }
   }
-
-  sleep_ms(100);
   stdio_init_all();
+  setbuf(stdout, NULL); // 標準出力のバッファリングを無効化
   sleep_ms(100);
 
   // Z80用メモリー初期化
@@ -316,12 +320,14 @@ int main() {
     volt = 1.30;
 
   //  エミュレーション開始(core1)
-  printf("\nAE-RP2040 Core:%0.2fV Clock:%dMHz\n", volt, sysclk / 1000);
+  printf("\nWaveshare RP2350-Zero Core:%0.2fV Clock:%dMHz\n", volt,
+         sysclk / 1000);
   printf("Emulation task(core1) Start..\n");
   multicore_launch_core1(emu_loop);
   sleep_ms(1000);
 
-  // CLK PWM Setup ,  MAX RP2040 400MHz Z80 11MHz
+  // CLK PWM Setup, RP2350 400MHz Z80 14MHz, 360MHz Z80 12MHz, 150MHz Z80 6MHz
+  // int Z80_freq = 14000000; // 14MHz
   // int Z80_freq = 12000000; // 12MHz
   // int Z80_freq = 11000000; // 11MHz
   // int Z80_freq = 10000000; // 10MHz
