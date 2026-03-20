@@ -267,7 +267,7 @@ int main() {
   uint32_t sysclk = clock_get_hz(clk_sys);
   int sysvolt = VREG_VOLTAGE_1_15;
 
-  if (true) { // 高速 コア電圧1.3V クロック 360/400MHz 設定
+  if (false) { // 高速 コア電圧1.3V クロック 360/400MHz 設定
     sleep_ms(100);
     sysvolt = VREG_VOLTAGE_1_30;
     vreg_set_voltage(sysvolt);
@@ -327,7 +327,7 @@ int main() {
   sleep_ms(1000);
 
   // CLK PWM Setup, RP2350 400MHz Z80 14MHz, 360MHz Z80 12MHz, 150MHz Z80 6MHz
-  int Z80_freq = 14000000; // 14MHz
+  // int Z80_freq = 14000000; // 14MHz
   // int Z80_freq = 12000000; // 12MHz
   // int Z80_freq = 11000000; // 11MHz
   // int Z80_freq = 10000000; // 10MHz
@@ -336,7 +336,7 @@ int main() {
   // int Z80_freq = 7000000; // 7MHz
   // int Z80_freq = 6000000; // 6MHz
   // int Z80_freq = 4000000; // 4MHz
-  // int Z80_freq = 2500000; // 2.5MHz
+  int Z80_freq = 2500000; // 2.5MHz
   // int Z80_freq = 20; // 20Hz
   gpio_set_function(CLK_PIN, GPIO_FUNC_PWM);
   uint slice_num = pwm_gpio_to_slice_num(CLK_PIN);
