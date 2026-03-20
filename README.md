@@ -15,7 +15,7 @@ github -> https://github.com/tendai22/EMUZ80_RP2040_PCB
 すぐに書き込んで試せるUF2ファイルをuf2フォルダに用意しています。
 - `EMUZ80_RP2040_xxMHz.uf2` — 秋月電子 AE-RP2040 用 （xxMHz=Z80の動作クロック）
 - `EMUZ80_RP2350-Zero_xxMHz.uf2` — Waveshare RP2350-Zero 用 （xxMHz=Z80の動作クロック）
-- `EMUZ80_RP2350B_CoreBoard_xxMHz.uf2` — WeAct RP2350B CoreBoard 用 （xxMHz=Z80の動作クロック）
+- `EMUZ80_RP2350B_Core_xxMHz.uf2` — WeAct RP2350B CoreBoard 用 （xxMHz=Z80の動作クロック）
 
 ## 通信端末ソフトの注意
 
