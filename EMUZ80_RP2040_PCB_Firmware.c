@@ -1,9 +1,9 @@
-// EMUZ80_RP2040_PCB_Firmware: Z80 bus emulator for Waveshare RP2350-Zero
+// EMUZ80_RP2040_PCB_Firmware: Z80 bus emulator for WeAct Studio RP2350B CoreBoard
 // ** For EMUZ80_RP2040_PCB! **
 // ** ROM-DATA: EMUBASIC_IO  **
 
 // #include "AE-RP2040.pio.h"
-#include "RP2350-Zero.pio.h"
+#include "WeAct-RP2350B.pio.h"
 #include "hardware/clocks.h"
 #include "hardware/pio.h"
 #include "hardware/pwm.h"
@@ -267,13 +267,13 @@ int main() {
   uint32_t sysclk = clock_get_hz(clk_sys);
   int sysvolt = VREG_VOLTAGE_1_15;
 
-  if (false) { // 高速 コア電圧1.3V クロック 360/400MHz 設定
+  if (true) { // 高速 コア電圧1.3V クロック 360/400MHz 設定
     sleep_ms(100);
     sysvolt = VREG_VOLTAGE_1_30;
     vreg_set_voltage(sysvolt);
     sleep_ms(100);
-    // sysclk = 400000;
-    sysclk = 360000;
+    sysclk = 400000;
+    // sysclk = 360000;
     set_sys_clock_khz(sysclk, true);
     set_qspi_clock_divider(sysclk, 133000); // QSPIクロックを133MHz以下に
     sleep_ms(100);
@@ -320,14 +320,14 @@ int main() {
     volt = 1.30;
 
   //  エミュレーション開始(core1)
-  printf("\nWaveshare RP2350-Zero Core:%0.2fV Clock:%dMHz\n", volt,
+  printf("\nWeAct Studio RP2350B CoreBoard:%0.2fV Clock:%dMHz\n", volt,
          sysclk / 1000);
   printf("Emulation task(core1) Start..\n");
   multicore_launch_core1(emu_loop);
   sleep_ms(1000);
 
   // CLK PWM Setup, RP2350 400MHz Z80 14MHz, 360MHz Z80 12MHz, 150MHz Z80 6MHz
-  // int Z80_freq = 14000000; // 14MHz
+  int Z80_freq = 14000000; // 14MHz
   // int Z80_freq = 12000000; // 12MHz
   // int Z80_freq = 11000000; // 11MHz
   // int Z80_freq = 10000000; // 10MHz
@@ -336,7 +336,7 @@ int main() {
   // int Z80_freq = 7000000; // 7MHz
   // int Z80_freq = 6000000; // 6MHz
   // int Z80_freq = 4000000; // 4MHz
-  int Z80_freq = 2500000; // 2.5MHz
+  // int Z80_freq = 2500000; // 2.5MHz
   // int Z80_freq = 20; // 20Hz
   gpio_set_function(CLK_PIN, GPIO_FUNC_PWM);
   uint slice_num = pwm_gpio_to_slice_num(CLK_PIN);

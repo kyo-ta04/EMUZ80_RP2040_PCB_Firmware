@@ -14,13 +14,14 @@
 .program m_emu
 ; バス監視とデータ送受信
     mov isr, null         ; ISRクリア
+    irq clear 0           ; IRQ 0 クリア 
 .wrap_target
 loop:
     wait 1 irq 0          ; trg_pin からの通知待ち
     in pins, 30           ; 全GPIO(0..29)取得して Auto Push
-    jmp pin loop          ; RD(GP21)=1 WRITEなのでloopへ
+    jmp pin loop          ; RD(GP25)=1 WRITEなのでloopへ
     ; --- READ 処理 ---
-    out pins, 8           ; Auto Pullしてデータバス(GP0-7)へ出力
+    out pins, 8           ; Auto Pullしてデータバス(GP16-23)へ出力
 .wrap
 
 .program d_pindirs

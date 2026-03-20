@@ -23,7 +23,7 @@ if (EXISTS ${picoVscode})
     include(${picoVscode})
 endif()
 # ====================================================================================
-set(PICO_BOARD waveshare_rp2350_zero CACHE STRING "Board type")
+set(PICO_BOARD weact_studio_rp2350b_core CACHE STRING "Board type")
 
 # Pull in Raspberry Pi Pico SDK (must be before project)
 include(pico_sdk_import.cmake)
@@ -41,7 +41,7 @@ pico_set_program_name(EMUZ80_RP2040_PCB_Firmware "EMUZ80_RP2040_PCB_Firmware")
 pico_set_program_version(EMUZ80_RP2040_PCB_Firmware "0.1")
 
 # Generate PIO header
-pico_generate_pio_header(EMUZ80_RP2040_PCB_Firmware ${CMAKE_CURRENT_LIST_DIR}/RP2350-Zero.pio)
+pico_generate_pio_header(EMUZ80_RP2040_PCB_Firmware ${CMAKE_CURRENT_LIST_DIR}/WeAct-RP2350B.pio)
 
 # Modify the below lines to enable/disable output over UART/USB
 pico_enable_stdio_uart(EMUZ80_RP2040_PCB_Firmware 0)
