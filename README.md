@@ -9,7 +9,7 @@ github -> https://github.com/tendai22/EMUZ80_RP2040_PCB
 ## 対応RP2040/RP2350ボード
 - 秋月電子 AE-RP2040 - [AE-RP2040ブランチはこちら](https://github.com/kyo-ta04/EMUZ80_RP2040_PCB_Firmware/tree/AE-RP2040)
 - Waveshare RP2350-Zero - [RP2350-Zeroブランチはこちら](https://github.com/kyo-ta04/EMUZ80_RP2040_PCB_Firmware/tree/RP2350-Zero)
-- WeAct Studio RP2350B CoreBoard - [RP2350B CoreBoardブランチはこちら](https://github.com/kyo-ta04/EMUZ80_RP2040_PCB_Firmware/tree/RP2350B-CoreBoard)
+- WeAct Studio RP2350B CoreBoard - [RP2350B CoreBoardブランチはこちら](https://github.com/kyo-ta04/EMUZ80_RP2040_PCB_Firmware/tree/RP2350B_CoreBoard)
 
 ### ビルド済み UF2 ファイル
 すぐに書き込んで試せるUF2ファイルをuf2フォルダに用意しています。
