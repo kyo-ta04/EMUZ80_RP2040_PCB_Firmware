@@ -7,7 +7,7 @@ EMUZ80_RP2040は実物の Z80 CPU を RP2040 または RP2350 搭載ボードで
 github -> https://github.com/tendai22/EMUZ80_RP2040_PCB
 
 **注意：**
-- 2026/3/22追記： GPIO26(RD#)を入力に使用してたため保護抵抗を入れました、GPIO28,20(RESET#,CLK)は出力ですが念のため保護抵抗を入れました。
+- 2026/3/22追記： GPIO26(WR#)を入力に使用してたため保護抵抗を入れました、GPIO28,20(RESET#,CLK)は出力ですが念のため保護抵抗を入れました。
 
 ## 対応RP2040/RP2350ボード
 - 秋月電子 AE-RP2040 - [AE-RP2040ブランチはこちら](https://github.com/kyo-ta04/EMUZ80_RP2040_PCB_Firmware/tree/AE-RP2040)
