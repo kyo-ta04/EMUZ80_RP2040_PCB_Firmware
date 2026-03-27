@@ -9,6 +9,7 @@
 #if PICO_RP2040
 #include "hardware/structs/ssi.h"
 #endif
+#include "hardware/structs/sio.h" // ← SIO直叩きに使用（最小限）
 #include "hardware/sync.h"
 #include "hardware/vreg.h"
 #include "pico/multicore.h"
@@ -18,14 +19,16 @@
 #include <stdlib.h>
 #include <string.h>
 
+
 // GPIO Pin Definitions
 #define ADRS_BASE 0  // GP0..15: Address Bus A0-15
 #define DATA_BASE 16 // GP16..23: Data Bus
 // #define IORQ_PIN 24  // GP24: IORQ
-#define MREQ_PIN 24  // GP24: MREQ
-#define RD_PIN 25    // GP25: RD
-#define WR_PIN 26    // GP26: WR
-#define WAIT_PIN 27  // GP27: WAIT
+#define MREQ_PIN 24 // GP24: MREQ
+#define RD_PIN 25   // GP25: RD
+#define WR_PIN 26   // GP26: WR
+// #define WAIT_PIN 27  // GP27: WAIT
+#define PA0_PIN 27   // GP27: PPI PA b0
 #define RESET_PIN 28 // GP28: RESET
 #define CLK_PIN 29   // GP29: CLK
 
@@ -221,6 +224,14 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
           uart_txdata = data_byte;
           uart_stat = uart_stat & 0xFD; // b2=0: TX busy
         }
+        if (ioadrs == 0x30) { // 0x30 : PPI PA
+          // ==== ここから先はSIO直叩き（最速） ====
+          if (data_byte & 1) {
+            sio_hw->gpio_set = (1u << PA0_PIN); // PA b0 ON (GPIO27)
+          } else {
+            sio_hw->gpio_clr = (1u << PA0_PIN); // PA b0 OFF (GPIO27)
+          }
+        }
       } else {                // MREQ=1, WR=1  I/O-Read (not Memory-access)
         if (ioadrs == 0x01) { // UART status
           data_byte = uart_stat;
@@ -294,6 +305,14 @@ int main() {
   gpio_init(RESET_PIN);
   gpio_set_dir(RESET_PIN, GPIO_OUT);
   gpio_put(RESET_PIN, 0); // RESET ON
+
+  // ====================== GPIO初期設定はC SDKで（超簡単・安全）
+  // ======================
+  gpio_init(PA0_PIN); // ピン初期化（FUNCSEL = SIOに自動設定）GPIO27
+  gpio_set_dir(PA0_PIN, GPIO_OUT); // 出力方向に設定（SIOのOEも自動でON）
+  gpio_put(PA0_PIN, 0);            // 初期値はOFF（任意）
+
+  printf("GPIO27 初期設定完了（SDK使用）→ 以後SIO直叩きでON/OFF\n");
 
   sleep_ms(100);
 
