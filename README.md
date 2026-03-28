@@ -63,6 +63,10 @@ BASIC プログラム(DATA文でマシン語組込済)
 200 END
 ```
 
+詳しくはこちらをどうぞ:
+- [Z80に「Lチカ」させてみた。1980年代のCPUが自分の手で動く瞬間、感動がヤバすぎた🤩 - note](https://note.com/quiet_duck4046/n/naef20d289d00)
+- [マイコンボードをゲットしたらやる事と言えば... - X](https://x.com/DragonBallEZ/status/2036812809519165501?s=20)
+
 
 ## EMUZ80_RP2040_PCB_Firmware
 @tendai22plus氏作の [EMUZ80_RP2040_PCB](https://github.com/tendai22/EMUZ80_RP2040_PCB) 基板用のファームウェアです。  
