@@ -64,12 +64,6 @@ const uint8_t testprg2[] = {0x21, 0x00, 0x00,  // LD HL, 0000
 // #define EMUBASIC_IO
 // #include "emubasic_io.h"
 
-// z80pack CP/M2.2 CCP/BDOS
-#include "ccp_bdos.h"
-
-// z80pack BIOS01
-#include "bios01.h"
-
 // const uint8_t boot[] = {
 //    0xC3, 0x18, 0x00, 0x42, 0x4F, 0x4F, 0x54, 0x3A,
 //    0x20, 0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x20, 0x57, // 0x0000
@@ -93,9 +87,27 @@ const unsigned char boot[] = {
     0x00,
     0xFA, // JP BIOS
 };
-
 const size_t boot_size = sizeof(boot);
 
+// z80pack CP/M2.2 CCP/BDOS
+#include "ccp_bdos.h"
+
+// z80pack BIOS01
+#include "bios01.h"
+
+// ====================== 仮想ディスク定義 ======================
+// A: 仮想ROMディスク (Read Only) - cpm22-1.dsk をそのまま埋め込む
+// z80pack cpm2-src-1.dsk
+// #include "cpm2-src-1.h"
+
+// z80pack cpm2-1.dsk
+#include "cpm22-1.h"
+
+// B: 仮想RAMディスク (Read/Write) - 十分なサイズを確保
+#define RAMDISK_SIZE (64 * 1024) // 64KB（必要に応じて128KBまで拡大可）
+static uint8_t ramdisk[RAMDISK_SIZE] = {0xE5}; // 初回は0xE5で埋めても良い
+
+//
 // --- Helper: Manual Clock Pulse ---
 static void clk_on_off(int n) {
   gpio_set_function(CLK_PIN, GPIO_FUNC_SIO);
@@ -249,6 +261,15 @@ void task1(void) {
   }
 }
 
+// uint32_t単位でコピー（RP2040のM0+にかなり効く）
+void fast_copy_128(uint8_t *dst, const uint8_t *src) {
+  uint32_t *d = (uint32_t *)dst;
+  const uint32_t *s = (const uint32_t *)src;
+  for (int i = 0; i < 32; i++) { // 128/4 = 32
+    *d++ = *s++;
+  }
+}
+
 // --- Main Emulation Loop ---
 __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
   PIO pio = pio0;
@@ -301,9 +322,60 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
           current_sector = data_byte;
         } else if (ioadrs == 0x0D) { // 13:0x0D : コマンド (0:Read/1:Write)
           read_write = data_byte;
-          if (read_write == 0) { // DISK READ
-            memset(memory + ((dma_addr_high << 8) | dma_addr_low), 0xE5, 128);
+          // if (read_write == 0) { // DISK READ
+          //   memset(memory + ((dma_addr_high << 8) | dma_addr_low), 0xE5,
+          //   128);
+          // }
+
+          uint16_t dma_addr = ((uint16_t)dma_addr_high << 8) | dma_addr_low;
+          uint8_t logical_sector = current_sector;
+          if (logical_sector >= 1)
+            logical_sector--; // 1-based → 0-based
+
+          uint32_t disk_offset =
+              ((uint32_t)current_track * 26UL + logical_sector) * 128UL;
+
+          if (read_write == 0) { // READ
+            uint8_t *src = NULL;
+            uint32_t max_size = 0;
+
+            if (current_drive == 0) { // A: ROM
+              src = (uint8_t *)romdisk;
+              max_size = ROMDISK_SIZE;
+            } else if (current_drive == 1) { // B: RAM
+              src = ramdisk;
+              max_size = RAMDISK_SIZE;
+            }
+
+            if (src && disk_offset + 128 <= max_size) {
+              memcpy(&memory[dma_addr], src + disk_offset, 128);
+              // fast_copy_128(&memory[dma_addr], src + disk_offset);  //
+              // 後で高速版に置き換え可
+              fdc_status = 0; // OK
+            } else {
+              memset(&memory[dma_addr], 0xE5, 128);
+              fdc_status = 1; // Error
+            }
+
+          } else { // WRITE
+            uint8_t *dst = NULL;
+            uint32_t max_size = 0;
+
+            if (current_drive == 0) { // A: ROM → 書き込み禁止
+              fdc_status = 1;
+            } else if (current_drive == 1) { // B: RAM
+              dst = ramdisk;
+              max_size = RAMDISK_SIZE;
+              if (disk_offset + 128 <= max_size) {
+                memcpy(dst + disk_offset, &memory[dma_addr], 128);
+                // fast_copy_128(dst + disk_offset, &memory[dma_addr]);
+                fdc_status = 0;
+              } else {
+                fdc_status = 1;
+              }
+            }
           }
+
         } else if (ioadrs == 0x0F) { // 15:0x0F : DMAアドレス
           dma_addr_low = data_byte;
         } else if (ioadrs == 0x10) { // 16:0x10 : DMAアドレス
@@ -373,7 +445,7 @@ int main() {
 
   sleep_ms(100);
   stdio_init_all();
-  sleep_ms(2000);
+  sleep_ms(100);
 
   // Z80用メモリー初期化
   memset(memory, 0xFF, MEMORY_SIZE);
@@ -410,11 +482,12 @@ int main() {
   // PIO初期化
   pio_init_bus();
 
-  // sleep_ms(2000);
+  sleep_ms(2000);
   // EMUZ80_RP2040_PCB
   printf("\n** For EMUZ80_RP2040_PCB! **\n");
   printf("** z80pack: CP/M2.2 CCP+BDOS(E400H-F9FFH), BIOS-01(FA00H-FC2FH), "
          "BOOT(0000H-) **\n");
+  printf("** DISK: z80pack cpm2-1.dsk **");
   printf("\n-hit [Enter] in terminal-\n");
   while (getchar_timeout_us(100) == PICO_ERROR_TIMEOUT)
     ;
@@ -440,10 +513,14 @@ int main() {
   // int Z80_freq = 6000000; // 6MHz
   // int Z80_freq = 4000000; // 4MHz
   // int Z80_freq = 2500000; // 2.5MHz
-  int Z80_freq = 1000000; // 1MHz
+  // int Z80_freq = 1000000; // 1MHz
+  // int Z80_freq = 400000; // 400kHz
+  // int Z80_freq = 300000; // 300kHz
+  // int Z80_freq = 200000; // 200kHz
+  int Z80_freq = 150000; // 150kHz
   // int Z80_freq = 100000; // 100kHz
-  // int Z80_freq = 10000; // 10kHz
-  // int Z80_freq = 20; // 20Hz
+  //  int Z80_freq = 10000; // 10kHz
+  //  int Z80_freq = 20; // 20Hz
   gpio_set_function(CLK_PIN, GPIO_FUNC_PWM);
   uint slice_num = pwm_gpio_to_slice_num(CLK_PIN);
   set_pwm_freq(CLK_PIN, Z80_freq);
