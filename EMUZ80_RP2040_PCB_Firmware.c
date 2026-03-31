@@ -145,7 +145,7 @@ const unsigned char boot[] = {
     0xC3, 0x18, 0x00, 0x42, 0x4F, 0x4F, 0x54, 0x3A,
     0x20, 0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x20, 0x57, // 0x00000000
     0x6F, 0x72, 0x6C, 0x64, 0x21, 0x0D, 0x0A, 0x00,
-    0x31, 0x80, 0x00, 0x21, 0x03, 0x00, 0xCD, 0x33, // 0x00000010
+    0x31, 0x80, 0x00, 0x21, 0xCB, 0xFA, 0xCD, 0x33, // 0x00000010
     0xFB, 0x76,                                     // 0x00000020
 };
 
@@ -165,7 +165,7 @@ static void clk_on_off(int n) {
 
 // --- Helper: Delayed RESET OFF ---
 static int64_t reset_off_callback(alarm_id_t id, void *user_data) {
-  printf("RESET-OFF (Delayed 1s)\n");
+  printf("RESET-OFF (Delayed 1s)\n\n");
   gpio_put(RESET_PIN, 1); // RESET-OFF (High)
   return 0;               // ONE_SHOT
 }
@@ -416,7 +416,7 @@ int main() {
 
   sleep_ms(100);
   stdio_init_all();
-  sleep_ms(100);
+  sleep_ms(2000);
 
   // Z80用メモリー初期化
   memset(memory, 0xFF, MEMORY_SIZE);
@@ -442,7 +442,7 @@ int main() {
   gpio_set_dir(PA0_PIN, GPIO_OUT); // 出力方向に設定（SIOのOEも自動でON）
   gpio_put(PA0_PIN, 0);            // 初期値はOFF（任意）
 
-  printf("GPIO27 初期設定完了（SDK使用）→ 以後SIO直叩きでON/OFF\n");
+  // printf("GPIO27 初期設定完了（SDK使用）→ 以後SIO直叩きでON/OFF\n");
 
   sleep_ms(100);
 
@@ -451,10 +451,10 @@ int main() {
   // PIO初期化
   pio_init_bus();
 
-  sleep_ms(2000);
+  // sleep_ms(2000);
   // EMUZ80_RP2040_PCB
   printf("\n** For EMUZ80_RP2040_PCB! **\n");
-  printf("** ROM-DATA: EMUBASIC_IO  **\n");
+  printf("** z80pack: BIOS(EA00H-FC2FH), BOOT01(0000H-) **\n");
   printf("\n-hit [Enter] in terminal-\n");
   while (getchar_timeout_us(100) == PICO_ERROR_TIMEOUT)
     ;
