@@ -262,7 +262,7 @@ void task1(void) {
 }
 
 // uint32_t単位でコピー（RP2040のM0+にかなり効く）
-void fast_copy_128(uint8_t *dst, const uint8_t *src) {
+void __time_critical_func(fast_copy_128)(uint8_t *dst, const uint8_t *src) {
   uint32_t *d = (uint32_t *)dst;
   const uint32_t *s = (const uint32_t *)src;
   for (int i = 0; i < 32; i++) { // 128/4 = 32
@@ -348,9 +348,12 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
             }
 
             if (src && disk_offset + 128 <= max_size) {
+              // uint32_t start = time_us_32(); // **** 時間測定 ****
               memcpy(&memory[dma_addr], src + disk_offset, 128);
-              // fast_copy_128(&memory[dma_addr], src + disk_offset);  //
+              // fast_copy_128(&memory[dma_addr], src + disk_offset); //
               // 後で高速版に置き換え可
+              // uint32_t end = time_us_32();
+              // printf("Read 128B: %u us\n", end - start);
               fdc_status = 0; // OK
             } else {
               memset(&memory[dma_addr], 0xE5, 128);
@@ -403,7 +406,7 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
       }
     }
     if (false) { // デバッグ用 Z80_freq = 20  (20Hz) で使用する
-      printf("%05d MREQ:%d WR:%d RD:%d ADRS:%04X DATA:%02X\n", count,
+      printf("%05u MREQ:%d WR:%d RD:%d ADRS:%04X DATA:%02X\n", count,
              (agpio >> MREQ_PIN) & 1, (agpio >> WR_PIN) & 1,
              (agpio >> RD_PIN) & 1, adrs_word, (int)data_byte);
     }
@@ -417,16 +420,24 @@ int main() {
   uint32_t sysclk = clock_get_hz(clk_sys);
   int sysvolt = VREG_VOLTAGE_1_15;
 
-  if (false) { // 高速 コア電圧1.3V クロック 360/400MHz 設定
+  if (true) { // 高速 コア電圧1.3V クロック 360/400MHz 設定
     sleep_ms(100);
     sysvolt = VREG_VOLTAGE_1_30;
     vreg_set_voltage(sysvolt);
     sleep_ms(100);
     // sysclk = 400000;
-    sysclk = 360000;
+    // sysclk = 360000; // baudr = 4
+    // sysclk = 340000; // baudr = 3
+    // sysclk = 320000; // baudr = 3
+    sysclk = 300000; // baudr = 3
+    // sysclk = 280000; // baudr = 3
+    // sysclk = 260000; // baudr = 2
+    // sysclk = 200000;
     if (set_sys_clock_khz(sysclk, true)) {
 #if PICO_RP2040
+      // ssi_hw->baudr = 2; // 400MHz / 3 = 133MHz
       ssi_hw->baudr = 3; // 400MHz / 3 = 133MHz
+                         // ssi_hw->baudr = 4; // 400MHz / 3 = 133MHz
 #endif
     }
   } else { // 標準　コア電圧 1.15V クロック 200MHz 設定
@@ -498,7 +509,7 @@ int main() {
     volt = 1.30;
 
   //  エミュレーション開始(core1)
-  printf("\nAE-RP2040 Core:%0.2fV Clock:%dMHz\n", volt, sysclk / 1000);
+  printf("\nAE-RP2040 Core:%0.2fV Clock:%uMHz\n", volt, sysclk / 1000);
   printf("Emulation task(core1) Start..\n");
   multicore_launch_core1(emu_loop);
   sleep_ms(1000);
@@ -514,12 +525,15 @@ int main() {
   // int Z80_freq = 4000000; // 4MHz
   // int Z80_freq = 2500000; // 2.5MHz
   // int Z80_freq = 1000000; // 1MHz
+  // int Z80_freq = 700000; // 700kHz
+  // int Z80_freq = 600000; // 600kHz
+  // int Z80_freq = 500000; // 500kHz
   // int Z80_freq = 400000; // 400kHz
   // int Z80_freq = 300000; // 300kHz
   // int Z80_freq = 200000; // 200kHz
-  int Z80_freq = 150000; // 150kHz
+  // int Z80_freq = 150000; // 150kHz
   // int Z80_freq = 100000; // 100kHz
-  //  int Z80_freq = 10000; // 10kHz
+  int Z80_freq = 10000; // 10kHz
   //  int Z80_freq = 20; // 20Hz
   gpio_set_function(CLK_PIN, GPIO_FUNC_PWM);
   uint slice_num = pwm_gpio_to_slice_num(CLK_PIN);
