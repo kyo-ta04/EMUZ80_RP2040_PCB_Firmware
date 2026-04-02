@@ -62,23 +62,23 @@
 
   FA33  FA73  0000              DPBASE:	DEFW	TRANS,0000H
   FA37  0000  0000              	DEFW	0000H,0000H
-  FA3B  FC3D  FA8D              	DEFW	DIRBF,DPBLK
-  FA3F  FF37  FCBD              	DEFW	CHK00,ALL00
+  FA3B  FC37  FA8D              	DEFW	DIRBF,DPBLK
+  FA3F  FF31  FCB7              	DEFW	CHK00,ALL00
                                 ;	disk parameter header for disk 01
   FA43  FA73  0000              	DEFW	TRANS,0000H
   FA47  0000  0000              	DEFW	0000H,0000H
-  FA4B  FC3D  FA8D              	DEFW	DIRBF,DPBLK
-  FA4F  FF47  FCDC              	DEFW	CHK01,ALL01
+  FA4B  FC37  FA8D              	DEFW	DIRBF,DPBLK
+  FA4F  FF41  FCD6              	DEFW	CHK01,ALL01
                                 ;	disk parameter header for disk 02
   FA53  FA73  0000              	DEFW	TRANS,0000H
   FA57  0000  0000              	DEFW	0000H,0000H
-  FA5B  FC3D  FA8D              	DEFW	DIRBF,DPBLK
-  FA5F  FF57  FCFB              	DEFW	CHK02,ALL02
+  FA5B  FC37  FA8D              	DEFW	DIRBF,DPBLK
+  FA5F  FF51  FCF5              	DEFW	CHK02,ALL02
                                 ;	disk parameter header for disk 03
   FA63  FA73  0000              	DEFW	TRANS,0000H
   FA67  0000  0000              	DEFW	0000H,0000H
-  FA6B  FC3D  FA8D              	DEFW	DIRBF,DPBLK
-  FA6F  FF67  FD1A              	DEFW	CHK03,ALL03
+  FA6B  FC37  FA8D              	DEFW	DIRBF,DPBLK
+  FA6F  FF61  FD14              	DEFW	CHK03,ALL03
                                 ;
                                 ;	sector translate vector for the IBM 8" SD disks
                                 ;
@@ -108,12 +108,12 @@
                                 ;	disk parameter header
   FA9C  0000  0000              HDB1:	DEFW	0000H,0000H
   FAA0  0000  0000              	DEFW	0000H,0000H
-  FAA4  FC3D  FABC              	DEFW	DIRBF,HDBLK
-  FAA8  FF77  FD39              	DEFW	CHKHD1,ALLHD1
+  FAA4  FC37  FABC              	DEFW	DIRBF,HDBLK
+  FAA8  FF71  FD33              	DEFW	CHKHD1,ALLHD1
   FAAC  0000  0000              HDB2:	DEFW	0000H,0000H
   FAB0  0000  0000              	DEFW	0000H,0000H
-  FAB4  FC3D  FABC              	DEFW	DIRBF,HDBLK
-  FAB8  FF77  FE38              	DEFW	CHKHD2,ALLHD2
+  FAB4  FC37  FABC              	DEFW	DIRBF,HDBLK
+  FAB8  FF71  FE32              	DEFW	CHKHD2,ALLHD2
                                 ;
                                 ;       disk parameter block for harddisk
                                 ;
@@ -391,11 +391,8 @@
                                 ;	properly, and 01h if an error occurs during the read or write
                                 ;
   FC32  D3 0D                   WAITIO: OUT	(FDCOP),A	;start i/o operation
-  FC34  DB 09                   WAITLP: IN	A,(09h)		;DMA status **** Add BIOS01 ****
-  FC36  B7                      	OR	A		;not 0 Busy
-  FC37  C2 FC34                 	JP	NZ,WAITLP 
-  FC3A  DB 0E                   	IN	A,(FDCST)	;status of i/o operation -> A
-  FC3C  C9                      	RET
+  FC34  DB 0E                   	IN	A,(FDCST)	;status of i/o operation -> A
+  FC36  C9                      	RET
                                 ;
                                 ;	the remainder of the CBIOS is reserved uninitialized
                                 ;	data area, and does not need to be a part of the
@@ -404,25 +401,25 @@
                                 ;
                                 ;	scratch ram area for BDOS use
                                 ;
-  FC3D  =                       BEGDAT	EQU	$		;beginning of data area
-  FC3D  ( 0080 )                DIRBF:	DEFS	128		;scratch directory area
-  FCBD  ( 001F )                ALL00:	DEFS	31		;allocation vector 0
-  FCDC  ( 001F )                ALL01:	DEFS	31		;allocation vector 1
-  FCFB  ( 001F )                ALL02:	DEFS	31		;allocation vector 2
-  FD1A  ( 001F )                ALL03:	DEFS	31		;allocation vector 3
-  FD39  ( 00FF )                ALLHD1:	DEFS	255		;allocation vector harddisk 1
-  FE38  ( 00FF )                ALLHD2:	DEFS	255		;allocation vector harddisk 2
-  FF37  ( 0010 )                CHK00:	DEFS	16		;check vector 0
-  FF47  ( 0010 )                CHK01:	DEFS	16		;check vector 1
-  FF57  ( 0010 )                CHK02:	DEFS	16		;check vector 2
-  FF67  ( 0010 )                CHK03:	DEFS	16		;check vector 3
-  FF77  ( 0000 )                CHKHD1:	DEFS	0		;check vector harddisk 1
-  FF77  ( 0000 )                CHKHD2:	DEFS	0		;check vector harddisk 2
+  FC37  =                       BEGDAT	EQU	$		;beginning of data area
+  FC37  ( 0080 )                DIRBF:	DEFS	128		;scratch directory area
+  FCB7  ( 001F )                ALL00:	DEFS	31		;allocation vector 0
+  FCD6  ( 001F )                ALL01:	DEFS	31		;allocation vector 1
+  FCF5  ( 001F )                ALL02:	DEFS	31		;allocation vector 2
+  FD14  ( 001F )                ALL03:	DEFS	31		;allocation vector 3
+  FD33  ( 00FF )                ALLHD1:	DEFS	255		;allocation vector harddisk 1
+  FE32  ( 00FF )                ALLHD2:	DEFS	255		;allocation vector harddisk 2
+  FF31  ( 0010 )                CHK00:	DEFS	16		;check vector 0
+  FF41  ( 0010 )                CHK01:	DEFS	16		;check vector 1
+  FF51  ( 0010 )                CHK02:	DEFS	16		;check vector 2
+  FF61  ( 0010 )                CHK03:	DEFS	16		;check vector 3
+  FF71  ( 0000 )                CHKHD1:	DEFS	0		;check vector harddisk 1
+  FF71  ( 0000 )                CHKHD2:	DEFS	0		;check vector harddisk 2
+                                ;
+  FF71  =                       ENDDAT	EQU	$		;end of data area
+  033A  =                       DATSIZ	EQU	$-BEGDAT	;size of data area
 Z80AS 4.8	Source file: BIOS01   	Page    8
 
-                                ;
-  FF77  =                       ENDDAT	EQU	$		;end of data area
-  033A  =                       DATSIZ	EQU	$-BEGDAT	;size of data area
                                 ;
   0000  =                       	END			;of BIOS
 
@@ -443,16 +440,16 @@ PUNCH ............................ FBD4   READER ........................... FBD
 SELDSK ........................... FBE0   SETTRK ........................... FC0C   SETSEC ........................... FC10 
 SETDMA ........................... FC25   READ ............................. FC2C   WRITE ............................ FC30 
 LISTST ........................... FBD1   SECTRAN .......................... FC14   DPBASE ........................... FA33 
-TRANS ............................ FA73   DIRBF ............................ FC3D   DPBLK ............................ FA8D 
-CHK00 ............................ FF37   ALL00 ............................ FCBD   CHK01 ............................ FF47 
-ALL01 ............................ FCDC   CHK02 ............................ FF57   ALL02 ............................ FCFB 
-CHK03 ............................ FF67   ALL03 ............................ FD1A   HDB1 ............................. FA9C 
-HDBLK ............................ FABC   CHKHD1 ........................... FF77   ALLHD1 ........................... FD39 
-HDB2 ............................. FAAC   CHKHD2 ........................... FF77   ALLHD2 ........................... FE38 
+TRANS ............................ FA73   DIRBF ............................ FC37   DPBLK ............................ FA8D 
+CHK00 ............................ FF31   ALL00 ............................ FCB7   CHK01 ............................ FF41 
+ALL01 ............................ FCD6   CHK02 ............................ FF51   ALL02 ............................ FCF5 
+CHK03 ............................ FF61   ALL03 ............................ FD14   HDB1 ............................. FA9C 
+HDBLK ............................ FABC   CHKHD1 ........................... FF71   ALLHD1 ........................... FD33 
+HDB2 ............................. FAAC   CHKHD2 ........................... FF71   ALLHD2 ........................... FE32 
 SIGNON ........................... FACB   LDERR ............................ FB1D   PRTMSG ........................... FB33 
 GOCPM ............................ FB9B   LOAD1 ............................ FB65   LOAD2 ............................ FB80 
 SELFD ............................ FBF4   SELHD1 ........................... FC00   SELHD2 ........................... FC06 
 SELHD ............................ FC09   SECT1 ............................ FC1F   WAITIO ........................... FC32 
-WAITLP ........................... FC34   BEGDAT ........................... FC3D   ENDDAT ........................... FF77 
-DATSIZ ........................... 033A   
-
+BEGDAT ........................... FC37   ENDDAT ........................... FF71   DATSIZ ........................... 033A 
+
+

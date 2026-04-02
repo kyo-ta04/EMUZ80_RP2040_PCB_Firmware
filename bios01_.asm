@@ -362,9 +362,6 @@ WRITE:	LD	A,1		;write command -> A
 ;	properly, and 01h if an error occurs during the read or write
 ;
 WAITIO: OUT	(FDCOP),A	;start i/o operation
-WAITLP: IN	A,(09h)		;DMA status **** Add BIOS01 ****
-	OR	A		;not 0 Busy
-	JP	NZ,WAITLP 
 	IN	A,(FDCST)	;status of i/o operation -> A
 	RET
 ;
