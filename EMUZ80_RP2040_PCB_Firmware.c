@@ -36,7 +36,7 @@
 #define MEMORY_SIZE 65536 // 64KB
 
 // static uint8_t memory[MEMORY_SIZE];
-static uint8_t __attribute__((aligned(4))) memory[MEMORY_SIZE];
+static uint8_t memory[MEMORY_SIZE];
 volatile bool stop_flg = false;
 
 // UART/USB 共有バッファ
@@ -106,8 +106,9 @@ const size_t boot_size = sizeof(boot);
 #include "cpm22-1.h"
 
 // B: 仮想RAMディスク (Read/Write) - 十分なサイズを確保
-#define RAMDISK_SIZE (64 * 1024) // 64KB（必要に応じて128KBまで拡大可）
-static uint8_t ramdisk[RAMDISK_SIZE] = {0xE5};
+#define RAMDISK_SIZE (36 * 1024) // 36KB（必要に応じて128KBまで拡大可）
+// static uint8_t ramdisk[RAMDISK_SIZE] = {0xE5};
+static uint8_t ramdisk[RAMDISK_SIZE];
 
 //
 // --- Helper: Manual Clock Pulse ---
@@ -572,10 +573,14 @@ int main() {
 
   // Z80用メモリー初期化
   memset(memory, 0xFF, MEMORY_SIZE);
+
   memcpy(memory + 0xE400, ccp_bdos, sizeof(ccp_bdos));
   //  memcpy(memory + 0xFA00, bios, sizeof(bios));
   memcpy(memory + 0xFA00, bios01, sizeof(bios01));
   memcpy(memory, boot, sizeof(boot));
+
+  // RAMディスクをCP/Mの空セクタで初期化（起動時1回だけ）
+  memset(ramdisk, 0xE5, RAMDISK_SIZE);
 
   // GPIO初期化 GP0-29
   // A0-A15:GP0-15,D0-D7:GP16-23,IORQ:GP24,MREQ:GP24,RD:GP25,WR:GP26,WAIT:GP27,RESET:GP28,CLK:GP29

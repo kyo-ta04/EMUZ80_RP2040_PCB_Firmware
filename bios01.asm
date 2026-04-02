@@ -55,15 +55,15 @@ WBOOTE: JP	WBOOT		;warm start
 ;	fixed data tables for four-drive standard
 ;	IBM-compatible 8" SD disks
 ;
-;	disk parameter header for disk 00
+;	 Drive 0 = A: (ROM disk)
 DPBASE:	DEFW	TRANS,0000H
 	DEFW	0000H,0000H
 	DEFW	DIRBF,DPBLK
 	DEFW	CHK00,ALL00
-;	disk parameter header for disk 01
-	DEFW	TRANS,0000H
+;	Drive 1 = B: (128KB RAM disk) New!
 	DEFW	0000H,0000H
-	DEFW	DIRBF,DPBLK
+	DEFW	0000H,0000H
+	DEFW	DIRBF,DPBB
 	DEFW	CHK01,ALL01
 ;	disk parameter header for disk 02
 	DEFW	TRANS,0000H
@@ -98,6 +98,38 @@ DPBLK:  DEFW	26		;sectors per track
 	DEFB	0		;alloc 1
 	DEFW	16		;check size
 	DEFW	2		;track offset
+
+;; =============================================================
+;; Disk Parameter Block for B: (128KB RAM Disk, 1KB/block)
+;; =============================================================
+;DPBB:   DEFW    64              ; SPT  : sectors per track = 64
+;        DEFB    3               ; BSH  : block shift = 3 -> 1KB/block (8 sectors)
+;        DEFB    7               ; BLM  : block mask = 7
+;        DEFB    0               ; EXM
+;        DEFW    127             ; DSM  : 128 blocks x 1KB = 128KB
+;        DEFW    127             ; DRM  : 128 directory entries
+;        DEFB    0C0H            ; AL0
+;        DEFB    00H             ; AL1
+;        DEFW    0000H           ; CKS  = 0 (RAM disk)
+;        DEFW    0000H           ; OFF  = 0
+
+; =============================================================
+; Disk Parameter Block for RAM Disk (Drive 1 = B:, 36KB, 1KB/block)
+; =============================================================
+DPBB: DEFW      26              ; SPT  : sectors per track = 26
+        DEFB    3               ; BSH  : block shift = 3  → 1KB/block
+        DEFB    7               ; BLM  : block mask = 7
+        DEFB    0               ; EXM  : extent mask
+        DEFW    35              ; DSM  : disk size -1   (36 blocks × 1KB = 36KB)
+        DEFW    31             ; DRM  : directory entries -1  (32 entries)
+        DEFB    080H            ; AL0
+        DEFB    00H             ; AL1
+        DEFW    0000H           ; CKS  = 0 (RAM disk)
+        DEFW    0000H           ; OFF  = 0
+
+
+
+
 ;
 ;	fixed data tables for 4MB harddisks
 ;
@@ -280,34 +312,53 @@ READER: IN	A,(AUXDAT)
 ;
 HOME:	LD	C,0		;select track 0
 	JP	SETTRK		;we will move to 00 on first read/write
-;
-;	select disk given by register C
-;
-SELDSK: LD	HL,0000H	;error return code
+;;
+;;	select disk given by register C
+;;
+; SELDSK: LD	HL,0000H	;error return code
+; 	LD	A,C
+;	CP	4		;FD drive 0-3?
+;	JP	C,SELFD		;go
+;	CP	8		;harddisk 1?
+;	JP	Z,SELHD1	;go
+;	CP	9		;harddisk 2?
+;	JP	Z,SELHD2	;go
+;	RET			;no, error
+;;	disk number is in the proper range
+;;	compute proper disk parameter header address
+;SELFD:	OUT	(FDCD),A	;select disk drive
+;	LD	L,A		;L=disk number 0,1,2,3
+;	ADD	HL,HL		;*2
+;	ADD	HL,HL		;*4
+;	ADD	HL,HL		;*8
+;	ADD	HL,HL		;*16 (size of each header)
+;	LD	DE,DPBASE
+;	ADD	HL,DE		;HL=.dpbase(diskno*16)
+;	RET
+;SELHD1:	LD	HL,HDB1		;dph harddisk 1
+;	JP	SELHD
+;SELHD2:	LD	HL,HDB2		;dph harddisk 2
+;SELHD:	OUT	(FDCD),A	;select harddisk drive
+;	RET
+
+; =============================================================
+; SELDSK - Select Disk (Modified for 2-Drive System)
+; =============================================================
+SELDSK: LD	HL,0000H	; error return code
 	LD	A,C
-	CP	4		;FD drive 0-3?
-	JP	C,SELFD		;go
-	CP	8		;harddisk 1?
-	JP	Z,SELHD1	;go
-	CP	9		;harddisk 2?
-	JP	Z,SELHD2	;go
-	RET			;no, error
-;	disk number is in the proper range
-;	compute proper disk parameter header address
-SELFD:	OUT	(FDCD),A	;select disk drive
-	LD	L,A		;L=disk number 0,1,2,3
-	ADD	HL,HL		;*2
-	ADD	HL,HL		;*4
-	ADD	HL,HL		;*8
-	ADD	HL,HL		;*16 (size of each header)
-	LD	DE,DPBASE
-	ADD	HL,DE		;HL=.dpbase(diskno*16)
-	RET
-SELHD1:	LD	HL,HDB1		;dph harddisk 1
-	JP	SELHD
-SELHD2:	LD	HL,HDB2		;dph harddisk 2
-SELHD:	OUT	(FDCD),A	;select harddisk drive
-	RET
+	CP	4				; FD drive 0-3?
+	OUT	(FDCD),A		;select disk drive
+    CP      0
+    JR      Z,SEL_A
+    CP      1
+    JR      Z,SEL_B
+    ; 2 and 3 are error
+    LD      HL,0000H
+    RET
+SEL_A:  LD      HL,DPBASE       ; Drive 0 DPH address
+    RET
+SEL_B:  LD      HL,DPBASE+16    ; Drive 1 DPH address
+    RET
 ;
 ;	set track given by register c
 ;
