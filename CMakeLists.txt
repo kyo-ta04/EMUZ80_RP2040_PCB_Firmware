@@ -63,6 +63,7 @@ target_link_libraries(EMUZ80_RP2040_PCB_Firmware
         hardware_pwm
         pico_multicore
         hardware_structs
+        hardware_dma
         )
 
 pico_add_extra_outputs(EMUZ80_RP2040_PCB_Firmware)

@@ -26,7 +26,8 @@
 // #define ROMDISK_SIZE  (256 * 1024)   //
 // 実際のファイルサイズに合わせて調整（多くてもOK）
 #define ROMDISK_SIZE (128 * 77 * 26) // 実際のファイルサイズに合わせて調整（多くてもOK）
-const uint8_t  __in_flash() romdisk[ROMDISK_SIZE] = {
+// const uint8_t  __in_flash() romdisk[ROMDISK_SIZE] = {
+const uint8_t __in_flash() __attribute__((aligned(4))) romdisk[ROMDISK_SIZE] = {
     // ここに cpm22-1.dsk のバイナリをそのまま貼り付け
     // （GitHubからRawでダウンロードして、配列初期化子に変換）
     // 例: 0xE5, 0xE5, ... （実際は全データ）

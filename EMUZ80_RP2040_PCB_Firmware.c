@@ -9,6 +9,7 @@
 #if PICO_RP2040
 #include "hardware/structs/ssi.h"
 #endif
+#include "hardware/dma.h"         // これをファイル上部に追加
 #include "hardware/structs/sio.h" // ← SIO直叩きに使用（最小限）
 #include "hardware/sync.h"
 #include "hardware/vreg.h"
@@ -34,7 +35,8 @@
 // #define MEMORY_SIZE 2048
 #define MEMORY_SIZE 65536 // 64KB
 
-static uint8_t memory[MEMORY_SIZE];
+// static uint8_t memory[MEMORY_SIZE];
+static uint8_t __attribute__((aligned(4))) memory[MEMORY_SIZE];
 volatile bool stop_flg = false;
 
 // UART/USB 共有バッファ
@@ -92,7 +94,7 @@ const size_t boot_size = sizeof(boot);
 // z80pack CP/M2.2 CCP/BDOS
 #include "ccp_bdos.h"
 
-// z80pack BIOS01
+// z80pack BIOS-01
 #include "bios01.h"
 
 // ====================== 仮想ディスク定義 ======================
@@ -105,7 +107,7 @@ const size_t boot_size = sizeof(boot);
 
 // B: 仮想RAMディスク (Read/Write) - 十分なサイズを確保
 #define RAMDISK_SIZE (64 * 1024) // 64KB（必要に応じて128KBまで拡大可）
-static uint8_t ramdisk[RAMDISK_SIZE] = {0xE5}; // 初回は0xE5で埋めても良い
+static uint8_t ramdisk[RAMDISK_SIZE] = {0xE5};
 
 //
 // --- Helper: Manual Clock Pulse ---
@@ -270,6 +272,18 @@ void __time_critical_func(fast_copy_128)(uint8_t *dst, const uint8_t *src) {
   }
 }
 
+// グローバル領域（emu_loopの外側）
+static int disk_dma_chan = -1;         // DMAチャネル番号（-1 = 未初期化）
+static volatile bool dma_busy = false; // DMA転送中フラグ
+
+void init_disk_dma(void) {
+  if (disk_dma_chan < 0) {
+    disk_dma_chan = dma_claim_unused_channel(true); // 自動で空きチャネル取得
+    printf("Disk DMA channel allocated: %d\n",
+           disk_dma_chan); // デバッグ用（後で削除可）
+  }
+}
+
 // --- Main Emulation Loop ---
 __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
   PIO pio = pio0;
@@ -284,6 +298,7 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
   uint8_t dma_addr_low = 0;
   uint8_t dma_addr_high = 0;
 
+  init_disk_dma(); // DMAC 初期化
   while (true) {
     // バスライン取得
     // GP0-29(A0-15=GP0-15,D0-7=GP16-23,MREQ=GP24,RD=GP25,WR=GP26,WAIT=GP27,RESET=GP28,CLK=GP29)
@@ -320,66 +335,156 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
           current_track = data_byte;
         } else if (ioadrs == 0x0C) { // 12:0x0C : セクタ選択
           current_sector = data_byte;
-        } else if (ioadrs == 0x0D) { // 13:0x0D : コマンド (0:Read/1:Write)
+        } else if (ioadrs == 0x0D) { // 13:0x0D:FDCOPコマンド(0=Read,1=Write)
+          // ------------------------------------------------------------------
           read_write = data_byte;
-          // if (read_write == 0) { // DISK READ
-          //   memset(memory + ((dma_addr_high << 8) | dma_addr_low), 0xE5,
-          //   128);
-          // }
 
-          uint16_t dma_addr = ((uint16_t)dma_addr_high << 8) | dma_addr_low;
+          uint16_t dma_addr_z80 = ((uint16_t)dma_addr_high << 8) | dma_addr_low;
           uint8_t logical_sector = current_sector;
           if (logical_sector >= 1)
             logical_sector--; // 1-based → 0-based
 
-          uint32_t disk_offset =
-              ((uint32_t)current_track * 26UL + logical_sector) * 128UL;
+          // 乗算を少し最適化（*26 = *16 + *8 + *2）
+          uint32_t disk_offset = ((uint32_t)current_track << 4) +
+                                 ((uint32_t)current_track << 3) +
+                                 ((uint32_t)current_track << 1);
+          disk_offset = (disk_offset + logical_sector) * 128UL;
 
-          if (read_write == 0) { // READ
-            uint8_t *src = NULL;
+          if (read_write == 0) { // ============== READ ==============
+            const uint8_t *src = NULL;
             uint32_t max_size = 0;
 
             if (current_drive == 0) { // A: ROM
-              src = (uint8_t *)romdisk;
+              src = romdisk;
               max_size = ROMDISK_SIZE;
             } else if (current_drive == 1) { // B: RAM
               src = ramdisk;
               max_size = RAMDISK_SIZE;
             }
-
-            if (src && disk_offset + 128 <= max_size) {
-              // uint32_t start = time_us_32(); // **** 時間測定 ****
-              memcpy(&memory[dma_addr], src + disk_offset, 128);
-              // fast_copy_128(&memory[dma_addr], src + disk_offset); //
-              // 後で高速版に置き換え可
-              // uint32_t end = time_us_32();
+            if (src && disk_offset + 128 <= max_size && disk_dma_chan >= 0) {
+              // 前のDMAがまだ動いていたら強制終了（安全策）
+              if (dma_channel_is_busy(disk_dma_chan)) {
+                dma_channel_abort(disk_dma_chan);
+              }
+              // uint32_t start = time_us_32(); // 時間測定
+              // DMAで128バイトコピー開始（即時）
+              dma_channel_config c =
+                  dma_channel_get_default_config(disk_dma_chan);
+              channel_config_set_transfer_data_size(&c,
+                                                    DMA_SIZE_8); // 8bit単位
+              channel_config_set_read_increment(&c, true);
+              channel_config_set_write_increment(&c, true);
+              // channel_config_set_dreq(&c, 0); // 常に即時（デフォルト）
+              dma_channel_configure(
+                  disk_dma_chan, &c,
+                  &memory[dma_addr_z80], // 書き込み先（Z80メモリ）
+                  src + disk_offset,     // 読み出し元
+                  128,                   // 転送数（バイト）
+                  true);                 // 即開始
+              // 転送終了待ちする場合
+              // dma_channel_wait_for_finish_blocking(disk_dma_chan);
+              // uint32_t end = time_us_32();    // 時間測定
               // printf("Read 128B: %u us\n", end - start);
-              fdc_status = 0; // OK
+              dma_busy = true; // DMA開始
+              fdc_status = 0;  // 即OK返却（DMAはバックグラウンド）
             } else {
-              memset(&memory[dma_addr], 0xE5, 128);
-              fdc_status = 1; // Error
+              memset(&memory[dma_addr_z80], 0xE5, 128);
+              fdc_status = 1;
             }
 
-          } else { // WRITE
+          } else { // ================== WRITE ==================
             uint8_t *dst = NULL;
             uint32_t max_size = 0;
-
             if (current_drive == 0) { // A: ROM → 書き込み禁止
               fdc_status = 1;
             } else if (current_drive == 1) { // B: RAM
               dst = ramdisk;
               max_size = RAMDISK_SIZE;
-              if (disk_offset + 128 <= max_size) {
-                memcpy(dst + disk_offset, &memory[dma_addr], 128);
-                // fast_copy_128(dst + disk_offset, &memory[dma_addr]);
+
+              if (dst && disk_offset + 128 <= max_size && disk_dma_chan >= 0) {
+                dma_channel_config c =
+                    dma_channel_get_default_config(disk_dma_chan);
+                channel_config_set_transfer_data_size(&c, DMA_SIZE_8);
+                channel_config_set_read_increment(&c, true);
+                channel_config_set_write_increment(&c, true);
+
+                dma_channel_configure(
+                    disk_dma_chan, &c,
+                    dst + disk_offset,     // 書き込み先（RAMディスク）
+                    &memory[dma_addr_z80], // 読み出し元（Z80メモリ）
+                    128, true);
+
                 fdc_status = 0;
               } else {
                 fdc_status = 1;
               }
             }
           }
+        }
 
-        } else if (ioadrs == 0x0F) { // 15:0x0F : DMAアドレス
+        // ---------------------------------------
+        //          read_write = data_byte;
+        //          // if (read_write == 0) { // DISK READ
+        //          //   memset(memory + ((dma_addr_high << 8) |
+        //          dma_addr_low), 0xE5,
+        //          //   128);
+        //          // }
+        //
+        //          uint16_t dma_addr = ((uint16_t)dma_addr_high << 8) |
+        //          dma_addr_low; uint8_t logical_sector = current_sector; if
+        //          (logical_sector >= 1)
+        //            logical_sector--; // 1-based → 0-based
+        //
+        //          uint32_t disk_offset =
+        //              ((uint32_t)current_track * 26UL + logical_sector) *
+        //              128UL;
+        //
+        //          if (read_write == 0) { // READ
+        //            uint8_t *src = NULL;
+        //            uint32_t max_size = 0;
+        //
+        //            if (current_drive == 0) { // A: ROM
+        //              src = (uint8_t *)romdisk;
+        //              max_size = ROMDISK_SIZE;
+        //            } else if (current_drive == 1) { // B: RAM
+        //              src = ramdisk;
+        //              max_size = RAMDISK_SIZE;
+        //            }
+        //
+        //            if (src && disk_offset + 128 <= max_size) {
+        //              // uint32_t start = time_us_32(); // **** 時間測定
+        //              **** memcpy(&memory[dma_addr], src + disk_offset,
+        //              128);
+        //              // fast_copy_128(&memory[dma_addr], src +
+        //              disk_offset);
+        //              //
+        //              // 後で高速版に置き換え可
+        //              // uint32_t end = time_us_32();
+        //              // printf("Read 128B: %u us\n", end - start);
+        //              fdc_status = 0; // OK
+        //            } else {
+        //              memset(&memory[dma_addr], 0xE5, 128);
+        //             fdc_status = 1; // Error
+        //          }
+        //
+        //          } else { // WRITE
+        //            uint8_t *dst = NULL;
+        //            uint32_t max_size = 0;
+        //
+        //            if (current_drive == 0) { // A: ROM → 書き込み禁止
+        //              fdc_status = 1;
+        //            } else if (current_drive == 1) { // B: RAM
+        //              dst = ramdisk;
+        //              max_size = RAMDISK_SIZE;
+        //              if (disk_offset + 128 <= max_size) {
+        //                memcpy(dst + disk_offset, &memory[dma_addr], 128);
+        //                // fast_copy_128(dst + disk_offset,
+        //                &memory[dma_addr]); fdc_status = 0;
+        //              } else {
+        //                fdc_status = 1;
+        //              }
+
+        else if (ioadrs == 0x0F) { // 15:0x0F : DMAアドレス
           dma_addr_low = data_byte;
         } else if (ioadrs == 0x10) { // 16:0x10 : DMAアドレス
           dma_addr_high = data_byte;
@@ -397,6 +502,13 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
         } else if (ioadrs == 0x01) { // === ポート1 : CONIN ===
           data_byte = uart_rxdata;
           uart_stat = 0;
+        } else if (ioadrs == 0x09) { // ← 新規追加：DMA完了ステータスポート
+          if (dma_busy && dma_channel_is_busy(disk_dma_chan)) {
+            data_byte = 0xFF; // まだ転送中（Busy）
+          } else {
+            data_byte = 0x00; // 転送完了（Ready）
+            dma_busy = false;
+          }
         } else if (ioadrs == 0x0E) { // 14:0x0E : FDCステータス(0:OK/1:NG)
           data_byte = 0;
         } else {
@@ -485,7 +597,6 @@ int main() {
   gpio_put(PA0_PIN, 0);            // 初期値はOFF（任意）
 
   // printf("GPIO27 初期設定完了（SDK使用）→ 以後SIO直叩きでON/OFF\n");
-
   sleep_ms(100);
 
   // Initial CLK pulses (Python: CLK_OnOff(10))
@@ -511,6 +622,7 @@ int main() {
   //  エミュレーション開始(core1)
   printf("\nAE-RP2040 Core:%0.2fV Clock:%uMHz\n", volt, sysclk / 1000);
   printf("Emulation task(core1) Start..\n");
+
   multicore_launch_core1(emu_loop);
   sleep_ms(1000);
 
@@ -521,10 +633,11 @@ int main() {
   // int Z80_freq = 9000000; // 9MHz
   // int Z80_freq = 8000000; // 8MHz
   // int Z80_freq = 7000000; // 7MHz
-  // int Z80_freq = 6000000; // 6MHz
+  int Z80_freq = 6000000; // 6MHz
   // int Z80_freq = 4000000; // 4MHz
   // int Z80_freq = 2500000; // 2.5MHz
   // int Z80_freq = 1000000; // 1MHz
+  // int Z80_freq = 800000; // 700kHz
   // int Z80_freq = 700000; // 700kHz
   // int Z80_freq = 600000; // 600kHz
   // int Z80_freq = 500000; // 500kHz
@@ -533,7 +646,7 @@ int main() {
   // int Z80_freq = 200000; // 200kHz
   // int Z80_freq = 150000; // 150kHz
   // int Z80_freq = 100000; // 100kHz
-  int Z80_freq = 10000; // 10kHz
+  // int Z80_freq = 10000; // 10kHz
   //  int Z80_freq = 20; // 20Hz
   gpio_set_function(CLK_PIN, GPIO_FUNC_PWM);
   uint slice_num = pwm_gpio_to_slice_num(CLK_PIN);
