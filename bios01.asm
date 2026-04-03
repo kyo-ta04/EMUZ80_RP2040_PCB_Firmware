@@ -55,26 +55,53 @@ WBOOTE: JP	WBOOT		;warm start
 ;	fixed data tables for four-drive standard
 ;	IBM-compatible 8" SD disks
 ;
-;	 Drive 0 = A: (ROM disk)
+;	 Drive 0 = A: (ROM disk 1)
 DPBASE:	DEFW	TRANS,0000H
 	DEFW	0000H,0000H
 	DEFW	DIRBF,DPBLK
 	DEFW	CHK00,ALL00
-;	Drive 1 = B: (128KB RAM disk) New!
+;	 Drive 1 = B: (ROM disk 2)
+	DEFW	TRANS,0000H
 	DEFW	0000H,0000H
-	DEFW	0000H,0000H
-	DEFW	DIRBF,DPBB
+	DEFW	DIRBF,DPBLK
 	DEFW	CHK01,ALL01
-;	disk parameter header for disk 02
+;	 Drive 2 = C: (ROM disk 3)
 	DEFW	TRANS,0000H
 	DEFW	0000H,0000H
 	DEFW	DIRBF,DPBLK
 	DEFW	CHK02,ALL02
-;	disk parameter header for disk 03
+;	 Drive 3 = D: (ROM disk 4)
 	DEFW	TRANS,0000H
 	DEFW	0000H,0000H
 	DEFW	DIRBF,DPBLK
 	DEFW	CHK03,ALL03
+; --- Drive E, F, G, H (Dummy DPH) ---
+	DEFW	0,0,0,0,0,0,0,0
+	DEFW	0,0,0,0,0,0,0,0
+	DEFW	0,0,0,0,0,0,0,0
+	DEFW	0,0,0,0,0,0,0,0
+; --- Drive I: 128KB RAM Disk (9th Drive) ---
+	DEFW	0000H,0000H	; XLT=0	
+	DEFW	0000H,0000H
+	DEFW	DIRBF, DPBI
+	DEFW	CHK04, ALL04
+
+;;	Drive 5 = F: (128KB RAM disk)
+;	DEFW	0000H,0000H
+;	DEFW	0000H,0000H
+;	DEFW	DIRBF,DPBB
+;	DEFW	CHK01,ALL01
+;	disk parameter header for disk 02
+;	DEFW	TRANS,0000H
+;	DEFW	0000H,0000H
+;	DEFW	DIRBF,DPBLK
+;	DEFW	CHK02,ALL02
+;	disk parameter header for disk 03
+;	DEFW	TRANS,0000H
+;	DEFW	0000H,0000H
+;	DEFW	DIRBF,DPBLK
+;	DEFW	CHK03,ALL03
+
 ;
 ;	sector translate vector for the IBM 8" SD disks
 ;
@@ -100,61 +127,59 @@ DPBLK:  DEFW	26		;sectors per track
 	DEFW	2		;track offset
 
 ;; =============================================================
-;; Disk Parameter Block for B: (128KB RAM Disk, 1KB/block)
+;; Disk Parameter Block for RAM Disk (Drive 1 = B:, 36KB, 1KB/block)
 ;; =============================================================
-;DPBB:   DEFW    64              ; SPT  : sectors per track = 64
-;        DEFB    3               ; BSH  : block shift = 3 -> 1KB/block (8 sectors)
+;DPBB: DEFW      26              ; SPT  : sectors per track = 26
+;        DEFB    3               ; BSH  : block shift = 3 1KB/block
 ;        DEFB    7               ; BLM  : block mask = 7
-;        DEFB    0               ; EXM
-;        DEFW    127             ; DSM  : 128 blocks x 1KB = 128KB
-;        DEFW    127             ; DRM  : 128 directory entries
-;        DEFB    0C0H            ; AL0
+;        DEFB    0               ; EXM  : extent mask
+;        DEFW    35              ; DSM  : disk size -1 (36 blocks x 1KB = 36KB)
+;        DEFW    31             ; DRM  : directory entries -1 (32 entries)
+;        DEFB    080H            ; AL0
 ;        DEFB    00H             ; AL1
 ;        DEFW    0000H           ; CKS  = 0 (RAM disk)
 ;        DEFW    0000H           ; OFF  = 0
 
 ; =============================================================
-; Disk Parameter Block for RAM Disk (Drive 1 = B:, 36KB, 1KB/block)
+; Disk Parameter Block for RAM Disk (Drive 8 = I:, 128KB, 1KB/block)
 ; =============================================================
-DPBB: DEFW      26              ; SPT  : sectors per track = 26
-        DEFB    3               ; BSH  : block shift = 3  → 1KB/block
+DPBI: DEFW      26              ; SPT  : sectors per track = 26
+        DEFB    3               ; BSH  : block shift = 3 1KB/block
         DEFB    7               ; BLM  : block mask = 7
         DEFB    0               ; EXM  : extent mask
-        DEFW    35              ; DSM  : disk size -1   (36 blocks × 1KB = 36KB)
-        DEFW    31             ; DRM  : directory entries -1  (32 entries)
-        DEFB    080H            ; AL0
-        DEFB    00H             ; AL1
+        DEFW    127             ; DSM  : disk size -1 (128 blocks x 1KB = 128KB)
+        DEFW    63              ; DRM  : directory entries -1 (64 entries)
+        DEFB    0C0H            ; AL0  : 1100 0000 (First 2 blocks for DIR)
+        DEFB    00H             ; AL1 
         DEFW    0000H           ; CKS  = 0 (RAM disk)
         DEFW    0000H           ; OFF  = 0
 
+;;
+;;	fixed data tables for 4MB harddisks
+;;
+;;	disk parameter header
+;HDB1:	DEFW	0000H,0000H
+;	DEFW	0000H,0000H
+;	DEFW	DIRBF,HDBLK
+;	DEFW	CHKHD1,ALLHD1
+;HDB2:	DEFW	0000H,0000H
+;	DEFW	0000H,0000H
+;	DEFW	DIRBF,HDBLK
+;	DEFW	CHKHD2,ALLHD2
+;;
+;;       disk parameter block for harddisk
+;;
+;HDBLK:  DEFW    128		;sectors per track
+;	DEFB    4		;block shift factor
+;	DEFB    15		;block mask
+;	DEFB    0		;extent mask
+;	DEFW    2039		;disk size-1
+;	DEFW    1023		;directory max
+;	DEFB    255		;alloc 0
+;	DEFB    255		;alloc 1
+;	DEFW    0		;check size
+;	DEFW    0		;track offset
 
-
-
-;
-;	fixed data tables for 4MB harddisks
-;
-;	disk parameter header
-HDB1:	DEFW	0000H,0000H
-	DEFW	0000H,0000H
-	DEFW	DIRBF,HDBLK
-	DEFW	CHKHD1,ALLHD1
-HDB2:	DEFW	0000H,0000H
-	DEFW	0000H,0000H
-	DEFW	DIRBF,HDBLK
-	DEFW	CHKHD2,ALLHD2
-;
-;       disk parameter block for harddisk
-;
-HDBLK:  DEFW    128		;sectors per track
-	DEFB    4		;block shift factor
-	DEFB    15		;block mask
-	DEFB    0		;extent mask
-	DEFW    2039		;disk size-1
-	DEFW    1023		;directory max
-	DEFB    255		;alloc 0
-	DEFB    255		;alloc 1
-	DEFW    0		;check size
-	DEFW    0		;track offset
 ;
 ;	messages
 ;
@@ -344,21 +369,34 @@ HOME:	LD	C,0		;select track 0
 ; =============================================================
 ; SELDSK - Select Disk (Modified for 2-Drive System)
 ; =============================================================
-SELDSK: LD	HL,0000H	; error return code
+SELDSK: LD	HL,0000H	; Error return code
 	LD	A,C
-	CP	4				; FD drive 0-3?
-	OUT	(FDCD),A		;select disk drive
-    CP      0
-    JR      Z,SEL_A
-    CP      1
-    JR      Z,SEL_B
-    ; 2 and 3 are error
-    LD      HL,0000H
-    RET
-SEL_A:  LD      HL,DPBASE       ; Drive 0 DPH address
-    RET
-SEL_B:  LD      HL,DPBASE+16    ; Drive 1 DPH address
-    RET
+	CP	9				; FD drive A-I? (0-8)
+	RET	NC				; Error	
+	OUT	(FDCD),A		; Select disk drive for RP2040
+	; DPH Address Calculation: HL = DPBASE + (A * 16)
+	LD      L, A
+	LD      H, 0
+	ADD     HL, HL          ; *2
+	ADD     HL, HL          ; *4
+	ADD     HL, HL          ; *8
+	ADD     HL, HL          ; *16
+	LD      DE, DPBASE
+	ADD     HL, DE
+	RET
+
+;    CP      0
+;    JR      Z,SEL_A
+;    CP      1
+;    JR      Z,SEL_B
+;    ; 2 and 3 are error
+;    LD      HL,0000H
+;    RET
+;SEL_A:  LD      HL,DPBASE       ; Drive 0 DPH address
+;    RET
+;SEL_B:  LD      HL,DPBASE+16    ; Drive 1 DPH address
+;    RET
+
 ;
 ;	set track given by register c
 ;
@@ -428,18 +466,20 @@ WAITLP: IN	A,(09h)		;DMA status **** Add BIOS01 ****
 ;
 BEGDAT	EQU	$		;beginning of data area
 DIRBF:	DEFS	128		;scratch directory area
-ALL00:	DEFS	31		;allocation vector 0
-ALL01:	DEFS	31		;allocation vector 1
-ALL02:	DEFS	31		;allocation vector 2
-ALL03:	DEFS	31		;allocation vector 3
-ALLHD1:	DEFS	255		;allocation vector harddisk 1
-ALLHD2:	DEFS	255		;allocation vector harddisk 2
-CHK00:	DEFS	16		;check vector 0
-CHK01:	DEFS	16		;check vector 1
-CHK02:	DEFS	16		;check vector 2
-CHK03:	DEFS	16		;check vector 3
-CHKHD1:	DEFS	0		;check vector harddisk 1
-CHKHD2:	DEFS	0		;check vector harddisk 2
+ALL00:	DEFS	31		;allocation vector 0 A:
+ALL01:	DEFS	31		;allocation vector 1 B:
+ALL02:	DEFS	31		;allocation vector 2 C:
+ALL03:	DEFS	31		;allocation vector 3 D:
+ALL04:	DEFS	31		;allocation vector 4 I:
+; ALLHD1:	DEFS	255		;allocation vector harddisk 1
+; ALLHD2:	DEFS	255		;allocation vector harddisk 2
+CHK00:	DEFS	16		;check vector 0 A:
+CHK01:	DEFS	16		;check vector 1 B:
+CHK02:	DEFS	16		;check vector 2 C:
+CHK03:	DEFS	16		;check vector 3 D:
+CHK04:	DEFS	16		;check vector 4 I:
+; CHKHD1:	DEFS	0		;check vector harddisk 1
+; CHKHD2:	DEFS	0		;check vector harddisk 2
 ;
 ENDDAT	EQU	$		;end of data area
 DATSIZ	EQU	$-BEGDAT	;size of data area
