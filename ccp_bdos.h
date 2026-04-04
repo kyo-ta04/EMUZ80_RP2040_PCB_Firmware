@@ -3,7 +3,7 @@
  * アドレスオフセット: 0xE400
  * E400-F9FF
  */
-#include <pico/platform.h> // これを追加
+#include <pico.h> // これを追加
 #include <stddef.h>
 #include <stdint.h>
 

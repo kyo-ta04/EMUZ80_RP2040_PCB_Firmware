@@ -90,31 +90,13 @@ const unsigned char boot[] = {
 };
 const size_t boot_size = sizeof(boot);
 
-// z80pack CP/M2.2 CCP/BDOS
-#include "ccp_bdos.h"
-
-// z80pack BIOS-01
-#include "bios01.h"
+// ====================== ROM/BIOSデータ (extern宣言) ======================
+// 各データは個別の .c ファイルでコンパイルされる
+#include "rom_data.h"
 
 // ====================== 仮想ディスク定義 ======================
-// A: 仮想ROMディスク (Read Only) - cpm22-1.dsk をそのまま埋め込む
-// z80pack cpm2-src-1.dsk
-// #include "cpm2-src-1.h"
-
-// z80pack cpm2-1.dsk
-#include "cpm22-1.h"
-
-// #define ROMDISK_SIZE (128 * 77 * 26)
-#define ROMDISK_SIZE (256 * 1024)
-const uint8_t __in_flash() __attribute__((aligned(4))) romdisk1[ROMDISK_SIZE];
-const uint8_t __in_flash() __attribute__((aligned(4))) romdisk2[ROMDISK_SIZE];
-const uint8_t __in_flash() __attribute__((aligned(4))) romdisk3[ROMDISK_SIZE];
-
 // bin2cで生成された各ROM配列を一つのテーブルにまとめる
-const uint8_t *const rom_disks[] = {romdisk, romdisk, romdisk, romdisk};
-
-//// グローバル変数
-// static const uint8_t *current_romdisk = rom_disks[0];
+const uint8_t *const rom_disks[] = {romdisk, cpm22_disk1, tp301a, z80forth, cpm22_htc};
 
 // B: 仮想RAMディスク (Read/Write) - 十分なサイズを確保
 #define RAMDISK_SIZE (128 * 1024) // 128KB 262,144 (128*26*39)=256256
@@ -263,16 +245,16 @@ void task1(void) {
     if (!(uart_stat)) {
       int c = getchar_timeout_us(0);
       if (c != PICO_ERROR_TIMEOUT) {
-        if (c == 0x04) { // Ctrl-D: Stop emulation
-          printf("\ntask1: Ctrl-D detected. Stopping..\n");
-          stop_flg = true;
-          break;
-        }
+//        if (c == 0x04) { // Ctrl-D: Stop emulation
+//          printf("\ntask1: Ctrl-D detected. Stopping..\n");
+//          stop_flg = true;
+//          break;
+//        }
         uart_rxdata = (uint8_t)c;
         uart_stat = 0xFF; // RX Data Available
       }
     }
-    sleep_ms(1);
+    sleep_us(500);
   }
 }
 
@@ -598,8 +580,8 @@ int main() {
   // // Z80用メモリー初期化
   // memset(memory, 0xFF, MEMORY_SIZE);
 
-  memcpy(memory + 0xE400, ccp_bdos, sizeof(ccp_bdos));
-  memcpy(memory + 0xFA00, bios01, sizeof(bios01));
+  memcpy(memory + 0xE400, ccp_bdos, ccp_bdos_size);
+  memcpy(memory + 0xFA00, bios01, bios01_size);
   memcpy(memory, boot, sizeof(boot));
 
   //  // RAMディスクをCP/Mの空セクタで初期化（起動時1回だけ）
@@ -637,7 +619,12 @@ int main() {
   printf("\n** For EMUZ80_RP2040_PCB! **\n");
   printf("** z80pack: CP/M2.2 CCP+BDOS(E400H-F9FFH), BIOS-01(FA00H-FC2FH), "
          "BOOT(0000H-) **\n");
-  printf("** DISK: z80pack cpm2-1.dsk **");
+  printf("** DISK0: z80pack cpm2-1.dsk **\n");
+  printf("** DISK1: cpm22_disk1.dsk    **\n");
+  printf("** DISK2: cpm22_tp301a.dsk   **\n");
+  printf("** DISK3: cpm22_z80forth.dsk **\n");
+  printf("** DISK8: RAMDISK 128KB      **\n");
+
   printf("\n-hit [Enter] in terminal-\n");
   while (getchar_timeout_us(100) == PICO_ERROR_TIMEOUT)
     ;

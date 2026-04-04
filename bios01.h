@@ -5,7 +5,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <pico/platform.h> // これを追加
+#include <pico.h> // これを追加
 
 // 
 const uint8_t  __in_flash() __attribute__((aligned(4)))  bios01[] = {
