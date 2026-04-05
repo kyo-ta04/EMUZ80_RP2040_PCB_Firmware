@@ -15,10 +15,12 @@ extern const uint8_t bios01[];
 extern const size_t bios01_size;
 
 // ROM Disks (256KB each)
-extern const uint8_t romdisk[];       // DISK0: cpm22-1.dsk
-extern const uint8_t cpm22_disk1[];   // DISK1: cpm22_disk1.dsk
-extern const uint8_t tp301a[];        // DISK2: cpm22_tp301a.dsk
-extern const uint8_t z80forth[];      // DISK3: cpm22_z80forth.dsk
-extern const uint8_t cpm22_htc[];     // DISK4: cpm22_htc.dsk (stub)
+extern const uint8_t romdisk[];     // DISK0: cpm22-1.dsk
+extern const uint8_t cpm22_disk1[]; // DISK1: cpm22_disk1.dsk
+extern const uint8_t tp301a[];      // DISK2: cpm22_tp301a.dsk
+extern const uint8_t z80forth[];    // DISK3: cpm22_z80forth.dsk
+
+extern const uint8_t cpm22_htc[]; // DISK4: cpm22_htc.dsk (stub)
+extern const size_t cpm22_htc_len;
 
 #endif // ROM_DATA_H

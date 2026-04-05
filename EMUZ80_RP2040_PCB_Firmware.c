@@ -95,8 +95,11 @@ const size_t boot_size = sizeof(boot);
 #include "rom_data.h"
 
 // ====================== 仮想ディスク定義 ======================
-// bin2cで生成された各ROM配列を一つのテーブルにまとめる
-const uint8_t *const rom_disks[] = {romdisk, cpm22_disk1, tp301a, z80forth, cpm22_htc};
+// cpm2c.pyで生成された各ROM配列を一つのテーブルにまとめる
+#define ROMDISK_SIZE                                                           \
+  (256 * 1024) // (128 * 26 * 77 = 256,256 / 256 * 1024 = 262,144)
+const uint8_t *const rom_disks[] = {romdisk, cpm22_disk1, tp301a, z80forth};
+// , cpm22_htc};
 
 // B: 仮想RAMディスク (Read/Write) - 十分なサイズを確保
 #define RAMDISK_SIZE (128 * 1024) // 128KB 262,144 (128*26*39)=256256
@@ -245,11 +248,11 @@ void task1(void) {
     if (!(uart_stat)) {
       int c = getchar_timeout_us(0);
       if (c != PICO_ERROR_TIMEOUT) {
-//        if (c == 0x04) { // Ctrl-D: Stop emulation
-//          printf("\ntask1: Ctrl-D detected. Stopping..\n");
-//          stop_flg = true;
-//          break;
-//        }
+        //        if (c == 0x04) { // Ctrl-D: Stop emulation
+        //          printf("\ntask1: Ctrl-D detected. Stopping..\n");
+        //          stop_flg = true;
+        //          break;
+        //        }
         uart_rxdata = (uint8_t)c;
         uart_stat = 0xFF; // RX Data Available
       }
@@ -353,16 +356,30 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
 
           if (read_write == 0) { // ============== READ ==============
             const uint8_t *src = NULL;
+            uint8_t *dst = NULL;
             uint32_t max_size = 0;
+            // printf("Read : drive=%u sec=%u track=%u\n", current_drive,
+            //       current_sector, current_track);
 
-            if (current_drive == 8) { // I: RAM
+            if (current_drive <= 3) { // A, B, C, D (ROM 256KB)
+              src = rom_disks[current_drive];
+              max_size = ROMDISK_SIZE;       // 256 * 1024
+            } else if (current_drive == 8) { // I: (ROM 650KB)
+              // cpm22_htc[ROM_SIZE_I]
+              src = cpm22_htc;
+              max_size = cpm22_htc_len;
+            } else if (current_drive == 9) { // J: (RAM 128KB)
               src = ramdisk;
               max_size = RAMDISK_SIZE;
-            } else if (current_drive <= 3) { // A, B, C, D : ROM
-              src = rom_disks[current_drive];
-              //              src = romdisk;
-              max_size = ROMDISK_SIZE;
             }
+            //            if (current_drive == 8) { // I: RAM
+            //              src = ramdisk;
+            //              max_size = RAMDISK_SIZE;
+            //            } else if (current_drive <= 3) { // A, B, C, D : ROM
+            //              src = rom_disks[current_drive];
+            //              //              src = romdisk;
+            //              max_size = ROMDISK_SIZE;
+            //            }
             // if (src && disk_offset + 128 <= max_size && disk_dma_chan >= 0) {
             if (src && (disk_offset + 128 <= max_size)) {
               // 前のDMAがまだ動いていたら強制終了（安全策）
@@ -402,7 +419,7 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
             //            } else if (current_drive == 1) { // B: RAM
             //              dst = ramdisk;
             //              max_size = RAMDISK_SIZE;
-            if (!(current_drive == 8)) { // I : RAM のみ書き込み許可
+            if (!(current_drive == 9)) { // J : RAM のみ書き込み許可
               fdc_status = 1;
             } else {
               dst = ramdisk;
@@ -541,21 +558,22 @@ int main() {
 
   if (true) { // 高速 コア電圧1.3V クロック 360/400MHz 設定
     sleep_ms(100);
-    sysvolt = VREG_VOLTAGE_1_30;
+    // sysvolt = VREG_VOLTAGE_1_30;
+    sysvolt = VREG_VOLTAGE_1_25;
     vreg_set_voltage(sysvolt);
     sleep_ms(100);
     // sysclk = 400000;
     // sysclk = 360000; // baudr = 4
     // sysclk = 340000; // baudr = 3
     // sysclk = 320000; // baudr = 3
-    sysclk = 300000; // baudr = 3
+    // sysclk = 300000; // baudr = 3
     // sysclk = 280000; // baudr = 3
-    // sysclk = 260000; // baudr = 2
+    sysclk = 266000; // baudr = 2
     // sysclk = 200000;
     if (set_sys_clock_khz(sysclk, true)) {
 #if PICO_RP2040
-      // ssi_hw->baudr = 2; // 400MHz / 3 = 133MHz
-      ssi_hw->baudr = 3; // 400MHz / 3 = 133MHz
+      ssi_hw->baudr = 2; // 400MHz / 3 = 133MHz
+                         // ssi_hw->baudr = 3; // 400MHz / 3 = 133MHz
                          // ssi_hw->baudr = 4; // 400MHz / 3 = 133MHz
 #endif
     }
@@ -619,11 +637,12 @@ int main() {
   printf("\n** For EMUZ80_RP2040_PCB! **\n");
   printf("** z80pack: CP/M2.2 CCP+BDOS(E400H-F9FFH), BIOS-01(FA00H-FC2FH), "
          "BOOT(0000H-) **\n");
-  printf("** DISK0: z80pack cpm2-1.dsk **\n");
-  printf("** DISK1: cpm22_disk1.dsk    **\n");
-  printf("** DISK2: cpm22_tp301a.dsk   **\n");
-  printf("** DISK3: cpm22_z80forth.dsk **\n");
-  printf("** DISK8: RAMDISK 128KB      **\n");
+  printf("** DISK0 A: z80pack cpm2-1.dsk   **\n");
+  printf("** DISK1 B: cpm22_disk1.dsk      **\n");
+  printf("** DISK2 C: cpm22_tp301a.dsk     **\n");
+  printf("** DISK3 D: cpm22_z80forth.dsk   **\n");
+  printf("** DISK8 I: cpm22_htc.dsk(650KB) **\n");
+  printf("** DISK9 J: RAMDISK (128KB)      **\n");
 
   printf("\n-hit [Enter] in terminal-\n");
   while (getchar_timeout_us(100) == PICO_ERROR_TIMEOUT)
@@ -631,7 +650,9 @@ int main() {
   float volt = 0;
   if (sysvolt == VREG_VOLTAGE_1_15)
     volt = 1.15;
-  if (sysvolt == VREG_VOLTAGE_1_30)
+  else if (sysvolt == VREG_VOLTAGE_1_25)
+    volt = 1.25;
+  else if (sysvolt == VREG_VOLTAGE_1_30)
     volt = 1.30;
 
   //  エミュレーション開始(core1)
@@ -641,7 +662,7 @@ int main() {
   multicore_launch_core1(emu_loop);
   sleep_ms(1000);
 
-  // CLK PWM Setup ,  MAX RP2040 400MHz Z80 11MHz
+  // CLK PWM Setup ,  MAX RP2040 300MHz Z80 6MHz
   // int Z80_freq = 12000000; // 12MHz
   // int Z80_freq = 11000000; // 11MHz
   // int Z80_freq = 10000000; // 10MHz
@@ -649,6 +670,7 @@ int main() {
   // int Z80_freq = 8000000; // 8MHz
   // int Z80_freq = 7000000; // 7MHz
   int Z80_freq = 6000000; // 6MHz
+  // int Z80_freq = 5000000; // 5MHz
   // int Z80_freq = 4000000; // 4MHz
   // int Z80_freq = 2500000; // 2.5MHz
   // int Z80_freq = 1000000; // 1MHz
