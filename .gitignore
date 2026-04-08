@@ -13,3 +13,4 @@ build*/
 *.hex
 *.map
 *.dis
+error.log
