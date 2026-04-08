@@ -572,9 +572,8 @@ int main() {
     // sysclk = 200000;
     if (set_sys_clock_khz(sysclk, true)) {
 #if PICO_RP2040
-      ssi_hw->baudr = 2; // 400MHz / 3 = 133MHz
-                         // ssi_hw->baudr = 3; // 400MHz / 3 = 133MHz
-                         // ssi_hw->baudr = 4; // 400MHz / 3 = 133MHz
+      // ssi_hw->baudr = 2; // 400MHz / 4 = 133MHz
+      ssi_hw->baudr = 4; // 400MHz / 4 = 133MHz
 #endif
     }
   } else { // 標準　コア電圧 1.15V クロック 200MHz 設定
