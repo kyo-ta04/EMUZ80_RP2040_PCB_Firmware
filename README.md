@@ -13,8 +13,8 @@ Github -> https://github.com/tendai22/EMUZ80_RP2040_PCB
 - **Z80 動作クロック**: 最大 6MHz
 - **RP2040 動作クロック**: 266MHz
 - **CP/M メモリ**: 64KB (TPA 62KB)
-- **ROM ディスク**: 最大 5 ドライブ (Flash 格納)
-- **RAM ディスク**: 1 ドライブ (256KB, SRAM)
+- **ROM ディスク**: 5 ドライブ (256KBx4 + 650KB、FlashROM 格納)
+- **RAM ディスク**: 1 ドライブ (128KBKB, SRAM)
 - **ターミナル接続**: USB 仮想 COM ポート (UART-USB)
 
 > [!NOTE]
@@ -34,7 +34,7 @@ Github -> https://github.com/tendai22/EMUZ80_RP2040_PCB
 | **C:** | 256KB | ROM | Turbo Pascal 3.01a |
 | **D:** | 256KB | ROM | Z80 fig-FORTH 1.1g |
 | **I:** | 650KB | ROM | HI-TECH C v3.09 コンパイラ |
-| **J:** | 256KB | RAM | 読み書き可能な RAM ディスク |
+| **J:** | 128KB | RAM | 読み書き可能な RAM ディスク |
 
 > [!NOTE]
 > ROM ディスクは読み取り専用です。ファイルの保存・編集には RAM ディスク (J:) を使用してください。
