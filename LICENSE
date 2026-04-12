@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2026 DragonBallEZ
+Copyright (c) 2026 DragonBallEZ(kyo-ta04)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,3 +19,27 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+--------------------------------------------------------------------
+
+重要例外：CP/M 2.2 および関連ファイル
+
+本リポジトリに含まれる以下のファイルはDigital Research由来のCP/M 2.2です：
+- ccp_bdos.*
+- cpm22-*.*
+- bios01.*（CP/M対応部分）
+
+これらについては、DRDOS, Inc.（President: Bryan Sparks氏）が2022年7月に付与したライセンスが適用されます。
+
+“Let this paragraph represent a right to use, distribute, modify, enhance, and otherwise
+make available in a nonexclusive manner CP/M and its derivatives. This right comes from
+the company, DRDOS, Inc.'s purchase of Digital Research, the company and all assets,
+dating back to the mid-1990's. DRDOS, Inc. and I, Bryan Sparks, President of DRDOS,
+Inc. as its representative, is the owner of CP/M and the successor in interest of
+Digital Research assets.”
+
+（出典：http://www.cpm.z80.de/license.html）
+
+このライセンスは非常に寛容で、商用利用も可能です（無保証）。
+
+プロジェクトのオリジナル部分はMITライセンスが適用されます。
