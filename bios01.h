@@ -1,3 +1,14 @@
+// bios01.h - Z80 CBIOS binary data for EMUZ80_RP2040_PCB
+//
+// Generated from bios01.asm by bin2c.py
+// Original: Z80 CBIOS for Z80-Simulator (z80pack)
+//           Copyright (C) 1988-2007 by Udo Munk
+// Modified: 2026 by DragonBallEZ (kyo-ta04)
+//
+// SPDX-License-Identifier: MIT
+// See LICENSE file for details.
+//
+
 /* Generated from "bios01.bin" by bin2c.py
  * 元のサイズ: 588 バイト
  * アライン後サイズ: 588 バイト (4byte境界)

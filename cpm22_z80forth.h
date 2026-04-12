@@ -1,3 +1,16 @@
+// cpm22_z80forth.h - CP/M 2.2 Z80 fig-FORTH ROM disk image (Drive D:) for EMUZ80_RP2040_PCB
+//
+// Generated from cpm22-z80forth.dsk by bin2c.py
+// Contains Z80 fig-FORTH 1.1g for CP/M
+// fig-FORTH is in the public domain (FORTH Interest Group)
+// CP/M 2.2 Copyright (C) 1979, Digital Research
+// Released for non-commercial redistribution by Caldera, Inc. (1998)
+//
+// SPDX-License-Identifier: MIT
+// See LICENSE file for details.
+//
+
+
 /* Generated from "dsk\cpm22-z80forth.dsk" by bin2c.py
  * サイズ: 256256 バイト
  * アドレスオフセット: 0x0

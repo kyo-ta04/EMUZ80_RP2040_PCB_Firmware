@@ -1,6 +1,11 @@
-;	Z80 CBIOS for Z80-Simulator
+; bios01.asm - Z80 CBIOS for EMUZ80_RP2040_PCB
 ;
-;	Copyright (C) 1988-2007 by Udo Munk
+; Original: Z80 CBIOS for Z80-Simulator (z80pack)
+;           Copyright (C) 1988-2007 by Udo Munk
+; Modified: 2026 by DragonBallEZ (kyo-ta04)
+;
+; SPDX-License-Identifier: MIT
+; See LICENSE file for details.
 ;
 MSIZE	EQU	64		;cp/m version memory size in kilobytes
 ;

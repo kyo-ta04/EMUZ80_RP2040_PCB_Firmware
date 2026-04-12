@@ -1,3 +1,14 @@
+// cpm22-1.h - CP/M 2.2 ROM disk image (Drive A:) for EMUZ80_RP2040_PCB
+//
+// Generated from cpm22-1.dsk by bin2c.py
+// CP/M 2.2 Copyright (C) 1979, Digital Research
+// Released for non-commercial redistribution by Caldera, Inc. (1998)
+// Disk image sourced from z80pack by Udo Munk (MIT License)
+//
+// SPDX-License-Identifier: MIT
+// See LICENSE file for details.
+//
+
 /* Generated from "cpm22-1.dsk" by bin2c.py
  * サイズ: 256256 バイト
  * アドレスオフセット: 0x0

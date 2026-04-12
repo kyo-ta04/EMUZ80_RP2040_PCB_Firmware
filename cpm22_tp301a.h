@@ -1,3 +1,15 @@
+// cpm22_tp301a.h - CP/M 2.2 Turbo Pascal ROM disk image (Drive C:) for EMUZ80_RP2040_PCB
+//
+// Generated from cpm22_tp301a.dsk by bin2c.py
+// Contains Turbo Pascal 3.01a for CP/M
+// Turbo Pascal Copyright (C) 1983-1985, Borland International
+// CP/M 2.2 Copyright (C) 1979, Digital Research
+// Released for non-commercial redistribution by Caldera, Inc. (1998)
+//
+// SPDX-License-Identifier: MIT
+// See LICENSE file for details.
+//
+
 /* Generated from "dsk\cpm22_tp301a.dsk" by bin2c.py
  * サイズ: 256256 バイト
  * アドレスオフセット: 0x0

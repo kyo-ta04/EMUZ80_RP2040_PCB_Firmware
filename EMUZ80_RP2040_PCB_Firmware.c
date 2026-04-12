@@ -1,6 +1,12 @@
-// EMUZ80_RP2040_PCB_Firmware: Z80 bus emulator for Akizuki AE-RP2040
+// EMUZ80_RP2040_PCB_Firmware.c - Z80 bus emulator for Akizuki AE-RP2040
+//
+// Copyright (C) 2026 DragonBallEZ (kyo-ta04)
+// https://github.com/kyo-ta04/EMUZ80_RP2040_PCB_Firmware
+//
+// SPDX-License-Identifier: MIT
+// See LICENSE file for details.
+//
 // ** For EMUZ80_RP2040_PCB! **
-// ** ROM-DATA: EMUBASIC_IO  **
 
 #include "AE-RP2040.pio.h"
 #include "hardware/clocks.h"
@@ -32,9 +38,8 @@
 #define RESET_PIN 28 // GP28: RESET
 #define CLK_PIN 29   // GP29: CLK
 
-// #define MEMORY_SIZE 2048
+// Z80用メモリー
 #define MEMORY_SIZE 65536 // 64KB
-// static uint8_t memory[MEMORY_SIZE];
 static uint8_t memory[MEMORY_SIZE] = {[0 ... MEMORY_SIZE - 1] = 0xFF};
 volatile bool stop_flg = false;
 
@@ -49,40 +54,9 @@ volatile uint8_t uart_rxdata = 0;
 volatile uint8_t uart_stat = 0;
 
 #define UART_RX_READY 0xFF
-// #define UART_TX_READY   0x02
-// volatile uint8_t uart_txdata = 0;
-// volatile uint8_t uart_rxdata = 0;
-// volatile uint8_t uart_stat = 1;
 
-// Test Program (from Python testprg2)
-const uint8_t testprg2[] = {0x21, 0x00, 0x00,  // LD HL, 0000
-                            0x22, 0x00, 0x80,  // LD (8000), HL
-                            0x23,              // INC HL
-                            0xC3, 0x03, 0x00}; // JP 0003
 
-// ROM-BASIC (EMUZ80のEMUBASIC)
-// @tendai22plusさんによる UART I/Oアクセス改造版
-// #define EMUBASIC_IO
-// #include "emubasic_io.h"
-
-// const uint8_t boot[] = {
-//    0xC3, 0x18, 0x00, 0x42, 0x4F, 0x4F, 0x54, 0x3A,
-//    0x20, 0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x20, 0x57, // 0x0000
-//    0x6F, 0x72, 0x6C, 0x64, 0x21, 0x0D, 0x0A, 0x00,
-//    0x31, 0x80, 0x00, 0x21, 0x03, 0x00, 0xCD, 0x33, // 0x0010
-//    0xFB, 0xCD, 0x06, 0xFA, 0xB7, 0xCA, 0x21, 0x00,
-//    0xCD, 0x09, 0xFA, 0x4F, 0xCD, 0x0C, 0xFA, 0xC3, // 0x0020
-//    0x21, 0x00, 0x76,                               // 0x0030
-//};
-
-// const unsigned char boot[] = {
-//     0xC3, 0x18, 0x00, 0x42, 0x4F, 0x4F, 0x54, 0x3A,
-//     0x20, 0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x20, 0x57, // 0x00000000
-//     0x6F, 0x72, 0x6C, 0x64, 0x21, 0x0D, 0x0A, 0x00,
-//     0x31, 0x80, 0x00, 0x21, 0xCB, 0xFA, 0xCD, 0x33, // 0x00000010
-//     0xFB, 0x76,                                     // 0x00000020
-// };
-
+// BOOT ROM
 const unsigned char boot[] = {
     0xC3,
     0x00,
@@ -99,7 +73,6 @@ const size_t boot_size = sizeof(boot);
 #define ROMDISK_SIZE                                                           \
   (256 * 1024) // (128 * 26 * 77 = 256,256 / 256 * 1024 = 262,144)
 const uint8_t *const rom_disks[] = {romdisk, cpm22_disk1, tp301a, z80forth};
-// , cpm22_htc};
 
 // B: 仮想RAMディスク (Read/Write) - 十分なサイズを確保
 #define RAMDISK_SIZE (128 * 1024) // 128KB 262,144 (128*26*39)=256256
@@ -224,35 +197,19 @@ void task1(void) {
   printf("task1 UART start..\n");
   while (true) {
     // 送信処理 (Z80 -> USB)
-    //    if ((uart_stat & 0x02) == 0) {
-    //      if (tud_cdc_connected() && tud_cdc_write_available() > 0) {
-    //        putchar(uart_txdata);
-    //        uart_stat |= 0x02; // TX Buffer Empty
-    //      }
-    //    }
-    while (uart_tx_head != uart_tx_tail) {
-
-      //        if (uart_is_writable()) {                // UART or
-      //        CDCが送信可能
+    while (uart_tx_head != uart_tx_tail) { // バッファが空でない間
       if (tud_cdc_connected() && tud_cdc_write_available() > 0) {
         uint8_t ch = uart_tx_buf[uart_tx_tail];
-        //        tud_cdc_write_char(ch); // USB CDCを使う場合はこちら
         putchar(ch);
         uart_tx_tail = (uart_tx_tail + 1) % UART_TX_BUF_SIZE;
       } else {
         break; // 今は送信できないので次回に持ち越し
       }
     }
-
     // 受信処理(US->Z80) RX Readyが0(空)の場合のみ入力をチェック
     if (!(uart_stat)) {
       int c = getchar_timeout_us(0);
       if (c != PICO_ERROR_TIMEOUT) {
-        //        if (c == 0x04) { // Ctrl-D: Stop emulation
-        //          printf("\ntask1: Ctrl-D detected. Stopping..\n");
-        //          stop_flg = true;
-        //          break;
-        //        }
         uart_rxdata = (uint8_t)c;
         uart_stat = 0xFF; // RX Data Available
       }
@@ -261,14 +218,6 @@ void task1(void) {
   }
 }
 
-// uint32_t単位でコピー（RP2040のM0+にかなり効く）
-void __time_critical_func(fast_copy_128)(uint8_t *dst, const uint8_t *src) {
-  uint32_t *d = (uint32_t *)dst;
-  const uint32_t *s = (const uint32_t *)src;
-  for (int i = 0; i < 32; i++) { // 128/4 = 32
-    *d++ = *s++;
-  }
-}
 
 // グローバル領域（emu_loopの外側）
 static int disk_dma_chan = -1;         // DMAチャネル番号（-1 = 未初期化）
@@ -338,15 +287,6 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
           // READ / WRITE 処理 (ioadrs == 0x0D 内)
           // ------------------------------------------------------------------
           read_write = data_byte;
-          // uint16_t dma_addr_z80 = ((uint16_t)dma_addr_high << 8) |
-          // dma_addr_low; uint8_t logical_sector = current_sector; if
-          // (logical_sector >= 1)
-          //   iogical_sector--; // 1-based → 0-based
-          // // 乗算を少し最適化（*26 = *16 + *8 + *2）
-          // uint32_t disk_offset = ((uint32_t)current_track << 4) +
-          //                        ((uint32_t)current_track << 3) +
-          //                        ((uint32_t)current_track << 1);
-          //          disk_offset = (disk_offset + logical_sector) * 128UL;
           uint16_t dma_addr_z80 = ((uint16_t)dma_addr_high << 8) | dma_addr_low;
           // オフセット計算 (128バイト * (トラック * 26 + セクタ-1))
           uint32_t logical_sector =
@@ -365,22 +305,12 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
               src = rom_disks[current_drive];
               max_size = ROMDISK_SIZE;       // 256 * 1024
             } else if (current_drive == 8) { // I: (ROM 650KB)
-              // cpm22_htc[ROM_SIZE_I]
               src = cpm22_htc;
               max_size = cpm22_htc_len;
             } else if (current_drive == 9) { // J: (RAM 128KB)
               src = ramdisk;
               max_size = RAMDISK_SIZE;
             }
-            //            if (current_drive == 8) { // I: RAM
-            //              src = ramdisk;
-            //              max_size = RAMDISK_SIZE;
-            //            } else if (current_drive <= 3) { // A, B, C, D : ROM
-            //              src = rom_disks[current_drive];
-            //              //              src = romdisk;
-            //              max_size = ROMDISK_SIZE;
-            //            }
-            // if (src && disk_offset + 128 <= max_size && disk_dma_chan >= 0) {
             if (src && (disk_offset + 128 <= max_size)) {
               // 前のDMAがまだ動いていたら強制終了（安全策）
               if (dma_channel_is_busy(disk_dma_chan)) {
@@ -414,11 +344,6 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
           } else { // ================== WRITE ==================
             uint8_t *dst = NULL;
             uint32_t max_size = 0;
-            //            if (current_drive == 0) { // A: ROM → 書き込み禁止
-            //              fdc_status = 1;
-            //            } else if (current_drive == 1) { // B: RAM
-            //              dst = ramdisk;
-            //              max_size = RAMDISK_SIZE;
             if (!(current_drive == 9)) { // J : RAM のみ書き込み許可
               fdc_status = 1;
             } else {
@@ -443,71 +368,7 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
               }
             }
           }
-        }
-
-        // ---------------------------------------
-        //          read_write = data_byte;
-        //          // if (read_write == 0) { // DISK READ
-        //          //   memset(memory + ((dma_addr_high << 8) |
-        //          dma_addr_low), 0xE5,
-        //          //   128);
-        //          // }
-        //
-        //          uint16_t dma_addr = ((uint16_t)dma_addr_high << 8) |
-        //          dma_addr_low; uint8_t logical_sector = current_sector; if
-        //          (logical_sector >= 1)
-        //            logical_sector--; // 1-based → 0-based
-        //
-        //          uint32_t disk_offset =
-        //              ((uint32_t)current_track * 26UL + logical_sector) *
-        //              128UL;
-        //
-        //          if (read_write == 0) { // READ
-        //            uint8_t *src = NULL;
-        //            uint32_t max_size = 0;
-        //
-        //            if (current_drive == 0) { // A: ROM
-        //              src = (uint8_t *)romdisk;
-        //              max_size = ROMDISK_SIZE;
-        //            } else if (current_drive == 1) { // B: RAM
-        //              src = ramdisk;
-        //              max_size = RAMDISK_SIZE;
-        //            }
-        //
-        //            if (src && disk_offset + 128 <= max_size) {
-        //              // uint32_t start = time_us_32(); // **** 時間測定
-        //              **** memcpy(&memory[dma_addr], src + disk_offset,
-        //              128);
-        //              // fast_copy_128(&memory[dma_addr], src +
-        //              disk_offset);
-        //              //
-        //              // 後で高速版に置き換え可
-        //              // uint32_t end = time_us_32();
-        //              // printf("Read 128B: %u us\n", end - start);
-        //              fdc_status = 0; // OK
-        //            } else {
-        //              memset(&memory[dma_addr], 0xE5, 128);
-        //             fdc_status = 1; // Error
-        //          }
-        //
-        //          } else { // WRITE
-        //            uint8_t *dst = NULL;
-        //            uint32_t max_size = 0;
-        //
-        //            if (current_drive == 0) { // A: ROM → 書き込み禁止
-        //              fdc_status = 1;
-        //            } else if (current_drive == 1) { // B: RAM
-        //              dst = ramdisk;
-        //              max_size = RAMDISK_SIZE;
-        //              if (disk_offset + 128 <= max_size) {
-        //                memcpy(dst + disk_offset, &memory[dma_addr], 128);
-        //                // fast_copy_128(dst + disk_offset,
-        //                &memory[dma_addr]); fdc_status = 0;
-        //              } else {
-        //                fdc_status = 1;
-        //              }
-
-        else if (ioadrs == 0x0F) { // 15:0x0F : DMAアドレス
+        } else if (ioadrs == 0x0F) { // 15:0x0F : DMAアドレス
           dma_addr_low = data_byte;
         } else if (ioadrs == 0x10) { // 16:0x10 : DMAアドレス
           dma_addr_high = data_byte;
@@ -556,30 +417,29 @@ int main() {
   uint32_t sysclk = clock_get_hz(clk_sys);
   int sysvolt = VREG_VOLTAGE_1_15;
 
-  if (true) { // 高速 コア電圧1.3V クロック 360/400MHz 設定
+  if (true) { // 高速 コア電圧1.3V クロック 266MHz 設定
     sleep_ms(100);
     // sysvolt = VREG_VOLTAGE_1_30;
     sysvolt = VREG_VOLTAGE_1_25;
     vreg_set_voltage(sysvolt);
     sleep_ms(100);
     // sysclk = 400000;
-    // sysclk = 360000; // baudr = 4
-    // sysclk = 340000; // baudr = 3
-    // sysclk = 320000; // baudr = 3
-    // sysclk = 300000; // baudr = 3
-    // sysclk = 280000; // baudr = 3
-    sysclk = 266000; // baudr = 2
+    // sysclk = 360000; 
+    // sysclk = 340000; 
+    // sysclk = 320000; 
+    // sysclk = 300000; 
+    // sysclk = 280000; 
+    sysclk = 266000; 
     // sysclk = 200000;
     if (set_sys_clock_khz(sysclk, true)) {
 #if PICO_RP2040
-      // ssi_hw->baudr = 2; // 400MHz / 4 = 133MHz
-      ssi_hw->baudr = 4; // 400MHz / 4 = 133MHz
+      // ssi_hw->baudr = 2; // 400MHz / 4 = 100MHz
+      ssi_hw->baudr = 4; // 266MHz / 4 = 66.5MHz
 #endif
     }
   } else { // 標準　コア電圧 1.15V クロック 200MHz 設定
     sleep_ms(100);
     //    vreg_set_voltage(VREG_VOLTAGE_1_15);
-    sysvolt = VREG_VOLTAGE_1_15;
     vreg_set_voltage(sysvolt);
     sleep_ms(100);
     sysclk = 200000;
@@ -595,14 +455,9 @@ int main() {
   sleep_ms(100);
 
   // // Z80用メモリー初期化
-  // memset(memory, 0xFF, MEMORY_SIZE);
-
   memcpy(memory + 0xE400, ccp_bdos, ccp_bdos_size);
   memcpy(memory + 0xFA00, bios01, bios01_size);
   memcpy(memory, boot, sizeof(boot));
-
-  //  // RAMディスクをCP/Mの空セクタで初期化（起動時1回だけ）
-  // memset(ramdisk, 0xE5, RAMDISK_SIZE);
 
   // GPIO初期化 GP0-29
   // A0-A15:GP0-15,D0-D7:GP16-23,IORQ:GP24,MREQ:GP24,RD:GP25,WR:GP26,WAIT:GP27,RESET:GP28,CLK:GP29
@@ -634,7 +489,7 @@ int main() {
   sleep_ms(2000);
   // EMUZ80_RP2040_PCB
   printf("\n** For EMUZ80_RP2040_PCB! **\n");
-  printf("** z80pack: CP/M2.2 CCP+BDOS(E400H-F9FFH), BIOS-01(FA00H-FC2FH), "
+  printf("** z80pack - CP/M2.2 CCP+BDOS(E400H-F9FFH), BIOS-01(FA00H-FC2FH), "
          "BOOT(0000H-) **\n");
   printf("** DISK0 A: z80pack cpm2-1.dsk   **\n");
   printf("** DISK1 B: cpm22_disk1.dsk      **\n");
@@ -646,6 +501,8 @@ int main() {
   printf("\n-hit [Enter] in terminal-\n");
   while (getchar_timeout_us(100) == PICO_ERROR_TIMEOUT)
     ;
+  printf("\nfor CP/M2.2 v1.0\n");
+
   float volt = 0;
   if (sysvolt == VREG_VOLTAGE_1_15)
     volt = 1.15;
@@ -655,7 +512,7 @@ int main() {
     volt = 1.30;
 
   //  エミュレーション開始(core1)
-  printf("\nAE-RP2040 Core:%0.2fV Clock:%uMHz\n", volt, sysclk / 1000);
+  printf("AE-RP2040 Core:%0.2fV Clock:%uMHz\n", volt, sysclk / 1000);
   printf("Emulation task(core1) Start..\n");
 
   multicore_launch_core1(emu_loop);
