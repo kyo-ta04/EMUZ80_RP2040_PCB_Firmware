@@ -84,10 +84,8 @@ github -> https://github.com/tendai22/EMUZ80_RP2040_PCB
 - WeAct Studio RP2350B CoreBoard - [RP2350B CoreBoardブランチはこちら](https://github.com/kyo-ta04/EMUZ80_RP2040_PCB_Firmware/tree/RP2350B_CoreBoard)
 
 ### ビルド済み UF2 ファイル
-すぐに書き込んで試せるUF2ファイルをuf2フォルダに用意しています。
-- `EMUZ80_RP2040_xxMHz.uf2` — 秋月電子 AE-RP2040 用 （xxMHz=Z80の動作クロック）
-- `EMUZ80_RP2350-Zero_xxMHz.uf2` — Waveshare RP2350-Zero 用 （xxMHz=Z80の動作クロック）
-- `EMUZ80_RP2350B_Core_xxMHz.uf2` — WeAct RP2350B CoreBoard 用 （xxMHz=Z80の動作クロック）
+すぐに書き込んで試せるUF2ファイルをルートフォルダに用意しています。(uf2フォルダ内はＬチカ不可です)
+- `EMUZ80_RP2040_PCB_LChika.uf2` — 秋月電子 AE-RP2040 用
 
 ## 通信端末ソフトの注意
 
