@@ -62,6 +62,7 @@ target_link_libraries(EMUZ80_RP2040_PCB_Firmware
 
 # Add the standard include files to the build
 target_include_directories(EMUZ80_RP2040_PCB_Firmware PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/boards/${PICO_BOARD}
         ${CMAKE_CURRENT_LIST_DIR}
 )
 

@@ -5,10 +5,8 @@
 //
 // SPDX-License-Identifier: MIT
 // See LICENSE file for details.
-//
-// ** For EMUZ80_RP2040_PCB! **
 
-#include "AE-RP2040.pio.h"
+#include "emuz80_rp/config.h"
 #include "hardware/clocks.h"
 #include "hardware/pio.h"
 #include "hardware/pwm.h"
@@ -26,26 +24,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-// GPIO Pin Definitions
-#define ADRS_BASE 0  // GP0..15: Address Bus A0-15
-#define DATA_BASE 16 // GP16..23: Data Bus
-// #define IORQ_PIN 24  // GP24: IORQ
-#define MREQ_PIN 24 // GP24: MREQ
-#define RD_PIN 25   // GP25: RD
-#define WR_PIN 26   // GP26: WR
-// #define WAIT_PIN 27  // GP27: WAIT
-#define PA0_PIN 27   // GP27: PPI PA b0
-#define RESET_PIN 28 // GP28: RESET
-#define CLK_PIN 29   // GP29: CLK
-
 // Z80用メモリー
-#define MEMORY_SIZE 65536 // 64KB
 static uint8_t memory[MEMORY_SIZE] = {[0 ... MEMORY_SIZE - 1] = 0xFF};
 volatile bool stop_flg = false;
 
 // UART/USB 共有バッファ
-#define UART_TX_BUF_SIZE 256
-
 volatile uint8_t uart_tx_buf[UART_TX_BUF_SIZE];
 volatile uint16_t uart_tx_head = 0; // コア1 (Z80側) が更新
 volatile uint16_t uart_tx_tail = 0; // コア0 (UART側) が更新
