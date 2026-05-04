@@ -138,11 +138,11 @@ void pio_init_bus() {
   pio_sm_config c_dirs = d_pindirs_program_get_default_config(offset_dirs);
   pio_sm_config c_dirsH = d_pindirs_program_get_default_config(offset_dirs);
 
-  // GPIOをPIO用に初期化 GP0-15(A0-15), GP16-23(D0-7), GP24(MREQ/IORQ),
-  // GP25(RD), GP26(WR), GP27(WAIT), GP28(RESET), GP29(CLK)
-  for (int i = 0; i <= 23; i++) {
-    pio_gpio_init(pio, i);
+  // D0-7のGPIOをPIO用に初期化
+  for (int i = 0; i < 8; i++) {
+    pio_gpio_init(pio, DATA_BASE + i);
   }
+
   //  pio_gpio_init(pio, IORQ_PIN); // GP24(IORQ)
   pio_gpio_init(pio, MREQ_PIN); // GP24(MREQ)
   pio_gpio_init(pio, RD_PIN);   // GP25(RD)
@@ -243,7 +243,11 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
     const uint32_t mreq_mask = (1u << MREQ_PIN);
     const uint32_t wr_mask = (1u << WR_PIN);
     uint32_t agpio = pio_sm_get_blocking(pio, sm_emu);
-    uint32_t adrs_word = (agpio & 0xFFFF);
+#if defined(ADRS_LOW_BASE)
+    uint32_t adrs_word = ((agpio >> ADRS_LOW_BASE) & 0xFF) | ((agpio >> (ADRS_HIGH_BASE - 8)) & 0xFF00);
+#else
+    uint32_t adrs_word = ((agpio >> ADRS_BASE) & 0xFFFF);
+#endif
 
     count++;
     if (!(agpio & mreq_mask)) { // MREQ=0 メモリアクセス
@@ -459,9 +463,30 @@ int main() {
 
   // GPIO初期化 GP0-29
   // A0-A15:GP0-15,D0-D7:GP16-23,IORQ:GP24,MREQ:GP24,RD:GP25,WR:GP26,WAIT:GP27,RESET:GP28,CLK:GP29
-  gpio_init_mask(0x0FFFFFFF);
-  for (int i = 0; i <= 23; i++) {
-    gpio_set_dir(i, GPIO_IN);
+#if defined(ADRS_LOW_BASE)
+  for (int i = 0; i < 8; i++) {
+    gpio_init(ADRS_LOW_BASE + i);
+    gpio_set_dir(ADRS_LOW_BASE + i, GPIO_IN);
+    //   gpio_pull_up(i);
+  }
+#endif
+#if defined(ADRS_HIGH_BASE)
+  for (int i = 0; i < 8; i++) {
+    gpio_init(ADRS_HIGH_BASE + i);
+    gpio_set_dir(ADRS_HIGH_BASE + i, GPIO_IN);
+    //   gpio_pull_up(i);
+  }
+#endif
+#if defined(ADRS_BASE)
+  for (int i = 0; i < 16; i++) {
+    gpio_init(ADRS_BASE + i);
+    gpio_set_dir(ADRS_BASE + i, GPIO_IN);
+    //   gpio_pull_up(i);
+  }
+#endif
+  for (int i = 0; i < 8; i++) {
+    gpio_init(DATA_BASE + i);
+    gpio_set_dir(DATA_BASE + i, GPIO_IN);
     //   gpio_pull_up(i);
   }
 
