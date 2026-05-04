@@ -143,14 +143,12 @@ void pio_init_bus() {
     pio_gpio_init(pio, DATA_BASE + i);
   }
 
-  //  pio_gpio_init(pio, IORQ_PIN); // GP24(IORQ)
-  pio_gpio_init(pio, MREQ_PIN); // GP24(MREQ)
-  pio_gpio_init(pio, RD_PIN);   // GP25(RD)
-  pio_gpio_init(pio, WR_PIN);   // GP26(WR)
-  //  pio_gpio_init(pio, WAIT_PIN); // GP27(WAIT)
-
   // SM0: trg_rw2 (Detection of falling edge on RD/WR)
+#if defined(WR_PIN)
   sm_config_set_in_pins(&c_trg, RD_PIN); // base = GP25 (RD, WR)
+#else
+  sm_config_set_in_pins(&c_trg, IORQ_PIN); // IORQ and MREQ
+#endif
   pio_sm_init(pio, sm_trg, offset_trg, &c_trg);
   pio_sm_set_enabled(pio, sm_trg, true);
 
@@ -222,6 +220,31 @@ void init_disk_dma(void) {
   }
 }
 
+static void wait_wr_active_and_read_data(const uint32_t gpio, uint8_t *data_out)
+{
+#if defined(WR_PIN) && (WR_PIN < 30)
+    if (!(gpio & (1u << WR_PIN))) {
+        if (data_out) {
+            *data_out = (uint8_t)((v >> DATA_BASE) & 0xffu);
+        }
+        return;
+    }
+#endif
+    const uint32_t timeout_loops = 100000u;
+    for (uint32_t i = 0; i < timeout_loops; i++) {
+        if (!gpio_get(WR_PIN)) {
+            uint32_t v = gpio_get_all();
+            if (data_out) {
+                *data_out = (uint8_t)((v >> DATA_BASE) & 0xffu);
+            }
+            return;
+        }
+
+        tight_loop_contents();
+    }
+    printf("%s: timeout\n", __func__);
+}
+
 // --- Main Emulation Loop ---
 __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
   PIO pio = pio0;
@@ -241,7 +264,12 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
     // バスライン取得
     // GP0-29(A0-15=GP0-15,D0-7=GP16-23,MREQ=GP24,RD=GP25,WR=GP26,WAIT=GP27,RESET=GP28,CLK=GP29)
     const uint32_t mreq_mask = (1u << MREQ_PIN);
+#if defined(WR_PIN) && (WR_PIN < 30)
     const uint32_t wr_mask = (1u << WR_PIN);
+#else
+    const uint32_t rfsh_mask = (1u << RFSH_PIN);
+#endif
+    const uint32_t rd_mask = (1u << RD_PIN);
     uint32_t agpio = pio_sm_get_blocking(pio, sm_emu);
 #if defined(ADRS_LOW_BASE)
     uint32_t adrs_word = ((agpio >> ADRS_LOW_BASE) & 0xFF) | ((agpio >> (ADRS_HIGH_BASE - 8)) & 0xFF00);
@@ -251,19 +279,23 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
 
     count++;
     if (!(agpio & mreq_mask)) { // MREQ=0 メモリアクセス
+#if defined(WR_PIN) && (WR_PIN < 30)
       if (!(agpio & wr_mask)) { // MREQ=0, WR=0  Memory-Write
-        data_byte = (uint8_t)(agpio >> DATA_BASE);
+#else
+      if ((agpio & rd_mask) && (agpio & rfsh_mask)) { // MREQ=0, RD=1, RFSH=1 Memory-Write
+#endif
+        wait_wr_active_and_read_data(agpio, &data_byte);
         //        if (adrs_word >= 0x8000) {
         memory[adrs_word] = data_byte;
         //        }
-      } else { // MREQ=0, WR=1  Memory-Read (not Write)
+      } else if (!(agpio & rd_mask)) { // MREQ=0, RD=0 Memory-Read
         data_byte = memory[adrs_word];
         pio_sm_put_blocking(pio, sm_emu, data_byte);
       }
     } else { // MREQ=1  I/Oアクセス
       uint ioadrs = adrs_word & 0xFF;
-      if (!(agpio & wr_mask)) { // MREQ=1, WR=0  I/O-Write (not Memory-access)
-        data_byte = (uint8_t)(agpio >> DATA_BASE);
+      if (agpio & rd_mask) { // MREQ=1, RD=1  I/O-Write (not Memory-access)
+        wait_wr_active_and_read_data(agpio, &data_byte);
         if (ioadrs == 0x01) { // CONOUT : ポート1
           uint8_t next = (uart_tx_head + 1) % UART_TX_BUF_SIZE;
           if (next != uart_tx_tail) {
@@ -370,12 +402,14 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
         } else if (ioadrs == 0x10) { // 16:0x10 : DMAアドレス
           dma_addr_high = data_byte;
         } else if (ioadrs == 0x30) { // 0x30 : PPI PA
+#if defined(PA0_PIN)
           // ==== ここから先はSIO直叩き（最速） ====
           if (data_byte & 1) {
             sio_hw->gpio_set = (1u << PA0_PIN); // PA b0 ON (GPIO27)
           } else {
             sio_hw->gpio_clr = (1u << PA0_PIN); // PA b0 OFF (GPIO27)
           }
+#endif
         }
       } else {                   // MREQ=1, WR=1  I/O-Read (not Memory-access)
         if (ioadrs == 0x00) {    // === ポート0 : CONSTA ===
@@ -400,9 +434,15 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
       }
     }
     if (false) { // デバッグ用 Z80_freq = 20  (20Hz) で使用する
+#if defined(WR_PIN) && (WR_PIN < 30)
       printf("%05u MREQ:%d WR:%d RD:%d ADRS:%04X DATA:%02X\n", count,
              (agpio >> MREQ_PIN) & 1, (agpio >> WR_PIN) & 1,
              (agpio >> RD_PIN) & 1, adrs_word, (int)data_byte);
+#else
+      printf("%05u MREQ:%d RFSH:%d RD:%d ADRS:%04X DATA:%02X\n", count,
+             (agpio >> MREQ_PIN) & 1, (agpio >> RFSH_PIN) & 1,
+             (agpio >> RD_PIN) & 1, adrs_word, (int)data_byte);
+#endif
     }
   }
 }
@@ -489,17 +529,50 @@ int main() {
     gpio_set_dir(DATA_BASE + i, GPIO_IN);
     //   gpio_pull_up(i);
   }
+#if defined(IORQ_PIN)
+  gpio_init(IORQ_PIN);
+  gpio_set_dir(IORQ_PIN, GPIO_IN);
+#endif
+  gpio_init(MREQ_PIN);
+  gpio_set_dir(MREQ_PIN, GPIO_IN);
+  gpio_init(RD_PIN);
+  gpio_set_dir(RD_PIN, GPIO_IN);
+#if defined(WR_PIN)
+  gpio_init(WR_PIN);
+  gpio_set_dir(WR_PIN, GPIO_IN);
+#endif
+#if defined(RFSH_PIN)
+  gpio_init(RFSH_PIN);
+  gpio_set_dir(RFSH_PIN, GPIO_IN);
+#endif
 
   // 他の制御ピン RESET:GP28 CLK:GP29
   gpio_init(RESET_PIN);
   gpio_set_dir(RESET_PIN, GPIO_OUT);
   gpio_put(RESET_PIN, 0); // RESET ON
+#if defined(WAIT_PIN)
+  gpio_init(WAIT_PIN);
+  gpio_set_dir(WAIT_PIN, GPIO_OUT);
+  gpio_put(WAIT_PIN, 1); // WAIT disable
+#endif
+#if defined(INT_PIN)
+  gpio_init(INT_PIN);
+  gpio_set_dir(INT_PIN, GPIO_OUT);
+  gpio_put(INT_PIN, 1); // interrupt disable
+#endif
+#if defined(VCC_5V_EN_PIN)
+  gpio_init(VCC_5V_EN_PIN);
+  gpio_set_dir(VCC_5V_EN_PIN, GPIO_OUT);
+  gpio_put(VCC_5V_EN_PIN, 0); // OFF
+#endif
 
   // ====================== GPIO初期設定はC SDKで（超簡単・安全）
   // ======================
+#if defined(PA0_PIN)
   gpio_init(PA0_PIN); // ピン初期化（FUNCSEL = SIOに自動設定）GPIO27
   gpio_set_dir(PA0_PIN, GPIO_OUT); // 出力方向に設定（SIOのOEも自動でON）
   gpio_put(PA0_PIN, 0);            // 初期値はOFF（任意）
+#endif
 
   // printf("GPIO27 初期設定完了（SDK使用）→ 以後SIO直叩きでON/OFF\n");
   sleep_ms(100);
@@ -535,6 +608,11 @@ int main() {
     volt = 1.25;
   else if (sysvolt == VREG_VOLTAGE_1_30)
     volt = 1.30;
+
+#if defined(VCC_5V_EN_PIN)
+  // Z80 VCC 5V オン
+  gpio_put(VCC_5V_EN_PIN, 1); // ON
+#endif
 
   //  エミュレーション開始(core1)
   printf("AE-RP2040 Core:%0.2fV Clock:%uMHz\n", volt, sysclk / 1000);
