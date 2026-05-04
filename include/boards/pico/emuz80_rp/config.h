@@ -22,4 +22,7 @@
 #define MEMORY_SIZE 65536 // 64KB
 #define UART_TX_BUF_SIZE 256
 
+//#define CONFIG_ROM_BASIC
+#define CONFIG_ROM_CPM
+
 #include "AE-RP2040.pio.h"

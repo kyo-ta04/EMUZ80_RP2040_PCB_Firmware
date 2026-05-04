@@ -38,7 +38,7 @@ volatile uint8_t uart_stat = 0;
 
 #define UART_RX_READY 0xFF
 
-
+#if defined(CONFIG_ROM_CPM)
 // BOOT ROM
 const unsigned char boot[] = {
     0xC3,
@@ -46,7 +46,14 @@ const unsigned char boot[] = {
     0xFA, // JP BIOS
 };
 const size_t boot_size = sizeof(boot);
+#endif
+#if defined(CONFIG_ROM_BASIC)
+const unsigned char emuz80_binary[] = {
+#include "roms/emubasic.inc"
+};
+#endif
 
+#if defined(CONFIG_ROM_CPM)
 // ====================== ROM/BIOSデータ (extern宣言) ======================
 // 各データは個別の .c ファイルでコンパイルされる
 #include "rom_data.h"
@@ -62,6 +69,7 @@ const uint8_t *const rom_disks[] = {romdisk, cpm22_disk1, tp301a, z80forth};
 static uint8_t __attribute__((aligned(4))) ramdisk[RAMDISK_SIZE] = {
     [0 ... RAMDISK_SIZE - 1] = 0xE5 // E5で埋めて未使用にする
 };
+#endif
 
 //
 // --- Helper: Manual Clock Pulse ---
@@ -266,6 +274,7 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
         } else if (ioadrs == 0x0C) { // 12:0x0C : セクタ選択
           current_sector = data_byte;
         } else if (ioadrs == 0x0D) { // 13:0x0D:FDCOPコマンド(0=Read,1=Write)
+#if defined(ROMDISK_SIZE)
           // ------------------------------------------------------------------
           // READ / WRITE 処理 (ioadrs == 0x0D 内)
           // ------------------------------------------------------------------
@@ -351,6 +360,7 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
               }
             }
           }
+#endif  // ROMDISK_SIZE
         } else if (ioadrs == 0x0F) { // 15:0x0F : DMAアドレス
           dma_addr_low = data_byte;
         } else if (ioadrs == 0x10) { // 16:0x10 : DMAアドレス
@@ -438,9 +448,14 @@ int main() {
   sleep_ms(100);
 
   // // Z80用メモリー初期化
+#if defined(CONFIG_ROM_CPM)
   memcpy(memory + 0xE400, ccp_bdos, ccp_bdos_size);
   memcpy(memory + 0xFA00, bios01, bios01_size);
   memcpy(memory, boot, sizeof(boot));
+#endif
+#if defined(CONFIG_ROM_BASIC)
+  memcpy(memory, emuz80_binary, sizeof(emuz80_binary));
+#endif
 
   // GPIO初期化 GP0-29
   // A0-A15:GP0-15,D0-D7:GP16-23,IORQ:GP24,MREQ:GP24,RD:GP25,WR:GP26,WAIT:GP27,RESET:GP28,CLK:GP29
@@ -472,6 +487,7 @@ int main() {
   sleep_ms(2000);
   // EMUZ80_RP2040_PCB
   printf("\n** For EMUZ80_RP2040_PCB! **\n");
+#if defined(CONFIG_ROM_CPM)
   printf("** z80pack - CP/M2.2 CCP+BDOS(E400H-F9FFH), BIOS-01(FA00H-FC2FH), "
          "BOOT(0000H-) **\n");
   printf("** DISK0 A: z80pack cpm2-1.dsk   **\n");
@@ -480,6 +496,7 @@ int main() {
   printf("** DISK3 D: cpm22_z80forth.dsk   **\n");
   printf("** DISK8 I: cpm22_htc.dsk(650KB) **\n");
   printf("** DISK9 J: RAMDISK (128KB)      **\n");
+#endif
 
   printf("\n-hit [Enter] in terminal-\n");
   while (getchar_timeout_us(100) == PICO_ERROR_TIMEOUT)
