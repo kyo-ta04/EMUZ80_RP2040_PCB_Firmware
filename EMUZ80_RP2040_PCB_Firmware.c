@@ -116,69 +116,82 @@ void set_pwm_freq(uint pin, uint32_t freq) {
   pwm_set_gpio_level(pin, (wrap + 1) / 2);
 }
 
-uint sm_trg = 0;
-uint sm_emu = 1;
-uint sm_dirsL = 2;
-uint sm_dirsH = 3;
+// PIO0
+uint sm_trg_wr = 0;
+uint sm_trg_rd = 1;
+uint sm_emu = 2;
+PIO pio_emu = pio0;
+// PIO1
+uint sm_dirsL = 0;
+uint sm_dirsH = 1;
+uint sm_data_out = 2;
+PIO pio_data_out = pio1;
 
 // --- PIO Helpers ---
 void pio_init_bus() {
-  PIO pio = pio0;
+  PIO pio;
 
-  // SM0: trg_rw2 (Detection of falling edge on RD/WR)
-  uint offset_trg = pio_add_program(pio, &trg_rw2_program);
-  pio_sm_config c_trg = trg_rw2_program_get_default_config(offset_trg);
+  // PIO 0
+  pio = pio0;
 
-  // SM1: m_emu (Address/Data handling)
+  // SM: trg_wr (Detection of falling edge on WR)
+  uint offset_trg_wr = pio_add_program(pio, &trg_rw_program);
+  pio_sm_config c_trg_wr = trg_rw_program_get_default_config(offset_trg_wr);
+#if defined(WR_PIN) && (WR_PIN < 30)
+  sm_config_set_in_pins(&c_trg_wr, WR_PIN);
+#else
+  sm_config_set_in_pins(&c_trg_wr, IORQ_PIN);
+#endif
+  pio_sm_init(pio, sm_trg_wr, offset_trg_wr, &c_trg_wr);
+  pio_sm_set_enabled(pio, sm_trg_wr, true);
+
+  // SM: trg_rd (Detection of falling edge on RD)
+  uint offset_trg_rd = pio_add_program(pio, &trg_rw_program);
+  pio_sm_config c_trg_rd = trg_rw_program_get_default_config(offset_trg_rd);
+#if defined(WR_PIN) && (WR_PIN < 30)
+  sm_config_set_in_pins(&c_trg_rd, RD_PIN);
+#else
+  sm_config_set_in_pins(&c_trg_rd, MREQ_PIN);
+#endif
+  pio_sm_init(pio, sm_trg_rd, offset_trg_rd, &c_trg_rd);
+  pio_sm_set_enabled(pio, sm_trg_rd, true);
+
+  // SM: m_emu (Address/Data handling)
   uint offset_emu = pio_add_program(pio, &m_emu_program);
   pio_sm_config c_emu = m_emu_program_get_default_config(offset_emu);
+  sm_config_set_in_pins(&c_emu, 0);
+  sm_config_set_in_shift(&c_emu, false, false, 30);  // shift left, auto_push=false, threshold=30
+  pio_sm_init(pio, sm_emu, offset_emu, &c_emu);
+  pio_sm_set_enabled(pio, sm_emu, true);
 
-  // SM2/3: d_pindirs (Direction toggle)
-  uint offset_dirs = pio_add_program(pio, &d_pindirs_program);
-  pio_sm_config c_dirs = d_pindirs_program_get_default_config(offset_dirs);
-  pio_sm_config c_dirsH = d_pindirs_program_get_default_config(offset_dirs);
-
-  // D0-7のGPIOをPIO用に初期化
+  // PIO 1
+  pio = pio1;
   for (int i = 0; i < 8; i++) {
     pio_gpio_init(pio, DATA_BASE + i);
   }
 
-  // SM0: trg_rw2 (Detection of falling edge on RD/WR)
-#if defined(WR_PIN)
-  sm_config_set_in_pins(&c_trg, RD_PIN); // base = GP25 (RD, WR)
-#else
-  sm_config_set_in_pins(&c_trg, IORQ_PIN); // IORQ and MREQ
-#endif
-  pio_sm_init(pio, sm_trg, offset_trg, &c_trg);
-  pio_sm_set_enabled(pio, sm_trg, true);
+  // SM: dirsL
+  uint offset_dirs = pio_add_program(pio, &d_pindirs_program);
+  pio_sm_config c_dirsL = d_pindirs_program_get_default_config(offset_dirs);
+  sm_config_set_set_pins(&c_dirsL, DATA_BASE, 4); // D0..D3
+  sm_config_set_in_pins(&c_dirsL, RD_PIN);
+  pio_sm_init(pio, sm_dirsL, offset_dirs, &c_dirsL);
+  pio_sm_set_enabled(pio, sm_dirsL, true);
 
-  // SM1: m_emu (Address/Data handling)
-  sm_config_set_in_pins(&c_emu, 0);             // base = GP0
-  sm_config_set_out_pins(&c_emu, DATA_BASE, 8); // base = GP16, cnt = 8
-  sm_config_set_jmp_pin(&c_emu, RD_PIN);
-
-  // D0-7ピン初期化(入力)
-  pio_sm_set_consecutive_pindirs(pio, sm_emu, DATA_BASE, 8, false);
-  // シフトレジスタの設定 (Auto Push/Pull 有効化)
-  // ISRのシフト方向, auto_push=true, threshold=30
-  sm_config_set_in_shift(&c_emu, false, true, 30);
-  // OSRのシフト方向, auto_pull=true, threshold=8
-  sm_config_set_out_shift(&c_emu, true, true, 8);
-
-  pio_sm_init(pio, sm_emu, offset_emu, &c_emu);
-  pio_sm_set_enabled(pio, sm_emu, true);
-
-  // SM2/3: d_pindirs (Direction toggle)
-  sm_config_set_set_pins(&c_dirs, DATA_BASE, 4); // GP0..3
-  sm_config_set_in_pins(&c_dirs, RD_PIN);
-  pio_sm_init(pio, sm_dirsL, offset_dirs, &c_dirs);
-
-  sm_config_set_set_pins(&c_dirsH, DATA_BASE + 4, 4); // GP4..7
+  // SM: dirsH
+  pio_sm_config c_dirsH = d_pindirs_program_get_default_config(offset_dirs);
+  sm_config_set_set_pins(&c_dirsH, DATA_BASE + 4, 4); // D4..D7
   sm_config_set_in_pins(&c_dirsH, RD_PIN);
   pio_sm_init(pio, sm_dirsH, offset_dirs, &c_dirsH);
-
-  pio_sm_set_enabled(pio, sm_dirsL, true);
   pio_sm_set_enabled(pio, sm_dirsH, true);
+
+  // SM: data_out (Output to data bus)
+  uint offset_data_out = pio_add_program(pio, &data_out_program);
+  pio_sm_config c_data_out = data_out_program_get_default_config(offset_data_out);
+  sm_config_set_out_pins(&c_data_out, DATA_BASE, 8);
+  sm_config_set_out_shift(&c_data_out, true, false, 8);  // shift right, auto_pull=false, threshold=8
+  pio_sm_init(pio, sm_data_out, offset_data_out, &c_data_out);
+  pio_sm_set_enabled(pio, sm_data_out, true);
 }
 
 // --- UART Task (Core 0) ---
@@ -225,7 +238,7 @@ static void wait_wr_active_and_read_data(const uint32_t gpio, uint8_t *data_out)
 #if defined(WR_PIN) && (WR_PIN < 30)
     if (!(gpio & (1u << WR_PIN))) {
         if (data_out) {
-            *data_out = (uint8_t)((v >> DATA_BASE) & 0xffu);
+            *data_out = (uint8_t)((gpio >> DATA_BASE) & 0xffu);
         }
         return;
     }
@@ -247,7 +260,6 @@ static void wait_wr_active_and_read_data(const uint32_t gpio, uint8_t *data_out)
 
 // --- Main Emulation Loop ---
 __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
-  PIO pio = pio0;
   uint count = 0;
   uint8_t data_byte = 0;
 
@@ -270,7 +282,7 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
     const uint32_t rfsh_mask = (1u << RFSH_PIN);
 #endif
     const uint32_t rd_mask = (1u << RD_PIN);
-    uint32_t agpio = pio_sm_get_blocking(pio, sm_emu);
+    uint32_t agpio = pio_sm_get_blocking(pio_emu, sm_emu);
 #if defined(ADRS_LOW_BASE)
     uint32_t adrs_word = ((agpio >> ADRS_LOW_BASE) & 0xFF) | ((agpio >> (ADRS_HIGH_BASE - 8)) & 0xFF00);
 #else
@@ -290,7 +302,7 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
         //        }
       } else if (!(agpio & rd_mask)) { // MREQ=0, RD=0 Memory-Read
         data_byte = memory[adrs_word];
-        pio_sm_put_blocking(pio, sm_emu, data_byte);
+        pio_sm_put_blocking(pio_data_out, sm_data_out, data_byte);
       }
     } else { // MREQ=1  I/Oアクセス
       uint ioadrs = adrs_word & 0xFF;
@@ -430,7 +442,7 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
         } else {
           data_byte = (uint8_t)(agpio >> DATA_BASE);
         }
-        pio_sm_put_blocking(pio, sm_emu, data_byte);
+        pio_sm_put_blocking(pio_data_out, sm_data_out, data_byte);
       }
     }
     if (false) { // デバッグ用 Z80_freq = 20  (20Hz) で使用する
