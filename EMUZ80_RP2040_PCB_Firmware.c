@@ -164,11 +164,11 @@ void pio_init_bus() {
 
   // SM2/3: d_pindirs (Direction toggle)
   sm_config_set_set_pins(&c_dirs, DATA_BASE, 4); // GP0..3
-  sm_config_set_jmp_pin(&c_dirs, RD_PIN);
+  sm_config_set_in_pins(&c_dirs, RD_PIN);
   pio_sm_init(pio, sm_dirsL, offset_dirs, &c_dirs);
 
   sm_config_set_set_pins(&c_dirsH, DATA_BASE + 4, 4); // GP4..7
-  sm_config_set_jmp_pin(&c_dirsH, RD_PIN);
+  sm_config_set_in_pins(&c_dirsH, RD_PIN);
   pio_sm_init(pio, sm_dirsH, offset_dirs, &c_dirsH);
 
   pio_sm_set_enabled(pio, sm_dirsL, true);

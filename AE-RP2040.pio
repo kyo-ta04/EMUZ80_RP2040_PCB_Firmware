@@ -1,7 +1,5 @@
 ; PIO - Z80 Bus Interface for RP2040
 
-.define RD_Pin 25
-
 .program trg_rw2
 ; RD/WRの立ち下がりを検出し、IRQ(0)を発生させる
 .wrap_target
@@ -35,8 +33,8 @@ loop:
     set pindirs, 0        ; 初期状態は入力(Hi-Z)
 .wrap_target
 loop:
-    wait 0 gpio RD_Pin        ; RD が Low になるまで待つ
+    wait 0 pin 0          ; RD が Low になるまで待つ
     set pindirs, 0xF      ; 出力に切り替え (注: set で指定できるのは5bitまで)
-    wait 1 gpio RD_Pin        ; RD が High に戻るのを待つ
+    wait 1 pin 0          ; RD が High に戻るのを待つ
     set pindirs, 0        ; 入力に戻す
 .wrap
