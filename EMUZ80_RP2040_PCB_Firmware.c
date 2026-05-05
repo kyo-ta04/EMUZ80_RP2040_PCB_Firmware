@@ -417,9 +417,9 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
 #if defined(PA0_PIN)
           // ==== ここから先はSIO直叩き（最速） ====
           if (data_byte & 1) {
-            sio_hw->gpio_set = (1u << PA0_PIN); // PA b0 ON (GPIO27)
+            sio_hw->gpio_set = (1u << PA0_PIN); // PA b0 ON
           } else {
-            sio_hw->gpio_clr = (1u << PA0_PIN); // PA b0 OFF (GPIO27)
+            sio_hw->gpio_clr = (1u << PA0_PIN); // PA b0 OF
           }
 #endif
         }
@@ -513,8 +513,8 @@ int main() {
   memcpy(memory, emuz80_binary, sizeof(emuz80_binary));
 #endif
 
-  // GPIO初期化 GP0-29
-  // A0-A15:GP0-15,D0-D7:GP16-23,IORQ:GP24,MREQ:GP24,RD:GP25,WR:GP26,WAIT:GP27,RESET:GP28,CLK:GP29
+  // GPIO初期化
+  // 入力: A0-A15,D0-D7,IORQ,MREQ,RD,WR,RFSH
 #if defined(ADRS_LOW_BASE)
   for (int i = 0; i < 8; i++) {
     gpio_init(ADRS_LOW_BASE + i);
@@ -558,7 +558,7 @@ int main() {
   gpio_set_dir(RFSH_PIN, GPIO_IN);
 #endif
 
-  // 他の制御ピン RESET:GP28 CLK:GP29
+  // 出力: RESET, WAIT, INT
   gpio_init(RESET_PIN);
   gpio_set_dir(RESET_PIN, GPIO_OUT);
   gpio_put(RESET_PIN, 0); // RESET ON
@@ -572,6 +572,8 @@ int main() {
   gpio_set_dir(INT_PIN, GPIO_OUT);
   gpio_put(INT_PIN, 1); // interrupt disable
 #endif
+
+  // VCC_5V_EN_PIN（Z80 側 5V 電源制御）
 #if defined(VCC_5V_EN_PIN)
   gpio_init(VCC_5V_EN_PIN);
   gpio_set_dir(VCC_5V_EN_PIN, GPIO_OUT);
@@ -581,12 +583,12 @@ int main() {
   // ====================== GPIO初期設定はC SDKで（超簡単・安全）
   // ======================
 #if defined(PA0_PIN)
-  gpio_init(PA0_PIN); // ピン初期化（FUNCSEL = SIOに自動設定）GPIO27
+  gpio_init(PA0_PIN); // ピン初期化（FUNCSEL = SIOに自動設定）
   gpio_set_dir(PA0_PIN, GPIO_OUT); // 出力方向に設定（SIOのOEも自動でON）
   gpio_put(PA0_PIN, 0);            // 初期値はOFF（任意）
 #endif
 
-  // printf("GPIO27 初期設定完了（SDK使用）→ 以後SIO直叩きでON/OFF\n");
+  // printf("GPIO 初期設定完了（SDK使用）→ 以後SIO直叩きでON/OFF\n");
   sleep_ms(100);
 
   // Initial CLK pulses (Python: CLK_OnOff(10))
