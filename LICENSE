@@ -43,3 +43,13 @@ Digital Research assets.”
 このライセンスは非常に寛容で、商用利用も可能です（無保証）。
 
 プロジェクトのオリジナル部分はMITライセンスが適用されます。
+--------------------------------------------------------------------
+
+Note on Version 7 Unix-derived code:
+
+Files in the cmd/ directory are derived from Version 7 Unix sources (historical source).
+Source: https://github.com/v7unix/v7unix/tree/master/v7/usr/src/cmd
+
+The original V7 Unix code is provided with attribution and is not subject to
+the MIT License. Modifications and additions by DragonBallEZ(kyo-ta04) are
+licensed under the MIT License.
