@@ -66,13 +66,22 @@ const size_t boot_size = sizeof(boot);
 
 // ====================== ROM/BIOSデータ (extern宣言) ======================
 // 各データは個別の .c ファイルでコンパイルされる
-#include "rom_data.h"
+#include "bios01.h"     // BIOSコード
+#include "ccp_bdos.h" // CCP BDOSコード
+#include "cpm22_1.h"  // CPM 2.2 Disk Image (Drive A: IBM 8" SD)
+#if 1
+#include "cpm22_disk1.h"    // CPM 2.2 Disk Image (Drive B: IBM 8" HD)
+#include "cpm22_htc.h"      // CPM 2.2 Disk Image (Drive I: 650KB Custom)
+#include "cpm22_tp301a.h"   // CPM 2.2 Disk Image (Drive C: IBM 8" SD)
+#include "cpm22_z80forth.h" // CPM 2.2 Disk Image (Drive D: IBM 8" SD)
+
+#endif
 
 // ====================== 仮想ディスク定義 ======================
 // cpm2c.pyで生成された各ROM配列を一つのテーブルにまとめる
 #define ROMDISK_SIZE                                                           \
   (256 * 1024) // (128 * 26 * 77 = 256,256 / 256 * 1024 = 262,144)
-const uint8_t *const rom_disks[] = {romdisk, cpm22_disk1, tp301a, z80forth};
+const uint8_t *const rom_disks[] = {cpm22_1, cpm22_disk1, tp301a, z80forth};
 
 // B: 仮想RAMディスク (Read/Write) - 十分なサイズを確保
 #define RAMDISK_SIZE (128 * 1024) // 128KB 262,144 (128*26*39)=256256

@@ -37,13 +37,13 @@ pico_sdk_init()
 
 add_executable(EMUZ80_RP2040_PCB_Firmware
     EMUZ80_RP2040_PCB_Firmware.c
-    ccp_bdos.c
     bios01.c
-    cpm22_1.c
-    cpm22_disk1.c
-    cpm22_tp301a.c
-    cpm22_z80forth.c
-    cpm22_htc.c
+    CPM/ccp_bdos.c
+    CPM/cpm22_1.c
+    CPM/cpm22_disk1.c
+    CPM/cpm22_tp301a.c
+    CPM/cpm22_z80forth.c
+    CPM/cpm22_htc.c
 )
 
 pico_set_program_name(EMUZ80_RP2040_PCB_Firmware "EMUZ80_RP2040_PCB_Firmware")
@@ -63,6 +63,8 @@ target_link_libraries(EMUZ80_RP2040_PCB_Firmware
 # Add the standard include files to the build
 target_include_directories(EMUZ80_RP2040_PCB_Firmware PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
+        ${CMAKE_CURRENT_LIST_DIR}/CPM
+
 )
 
 # Add any user requested libraries

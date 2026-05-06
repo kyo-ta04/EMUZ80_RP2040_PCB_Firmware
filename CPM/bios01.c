@@ -1,4 +1,5 @@
-// bios01.h - Z80 CBIOS binary data for EMUZ80_RP2040_PCB
+
+// bios01.c - Z80 CBIOS binary data for EMUZ80_RP2040_PCB
 //
 // Generated from bios01.asm by bin2c.py
 // Original: Z80 CBIOS for Z80-Simulator (z80pack)
@@ -18,6 +19,8 @@
 #include <pico.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include "bios01.h"
 
 const size_t bios01_size = 588;
 const uint8_t __in_flash() __attribute__((aligned(4))) bios01[] = {
