@@ -71,10 +71,9 @@ const size_t boot_size = sizeof(boot);
 #include "cpm22_1.h"  // CPM 2.2 Disk Image (Drive A: IBM 8" SD)
 #if 1
 #include "cpm22_disk1.h"    // CPM 2.2 Disk Image (Drive B: IBM 8" HD)
-#include "cpm22_htc.h"      // CPM 2.2 Disk Image (Drive I: 650KB Custom)
 #include "cpm22_tp301a.h"   // CPM 2.2 Disk Image (Drive C: IBM 8" SD)
 #include "cpm22_z80forth.h" // CPM 2.2 Disk Image (Drive D: IBM 8" SD)
-
+#include "cpm22_htc.h"      // CPM 2.2 Disk Image (Drive I: 650KB Custom)
 #endif
 
 // ====================== 仮想ディスク定義 ======================
