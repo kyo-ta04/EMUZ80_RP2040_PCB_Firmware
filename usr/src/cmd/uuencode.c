@@ -1,0 +1,135 @@
+/*
+ * uuencode [input] output
+ *
+ * Encode a file so it can be mailed to a remote system.
+ */
+
+/*
+ * Based on: https://github.com/RetroBSD/retrobsd/blob/master/src/cmd/uucp/uuencode.c
+ * Modified 2026 @DragonBallEZ: CP/M support, binary mode, external linking
+ * SPDX-License-Identifier: BSD-3-Clause
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+
+#ifndef CPM
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#else
+#include <stat.h>
+#include <sys.h>
+#endif
+
+/* ENC is the basic 1 character encoding function to make a char printing */
+#define ENC(c) ((c) ? ((c) & 077) + ' ': '`')
+
+void encode(FILE *in, FILE *out); /* static void encode(FILE *in, FILE *out); */
+int fr(FILE *fd, char *buf, int cnt);  /* static int fr(FILE *fd, char *buf, int cnt);*/
+void outdec(char *p, FILE *f);  /* static void outdec(char *p, FILE *f); */
+
+int main(int argc, char **argv)
+{
+	FILE *in;
+	struct stat sbuf;
+	int mode;
+
+	/* optional 1st argument */
+	if (argc > 2) {
+		if ((in = fopen(argv[1], "rb")) == NULL) { /* open mode "r" -> "rb" */
+			perror(argv[1]);
+			exit(1);
+		}
+		argv++; argc--;
+	} else
+		in = stdin;
+
+	if (argc != 2) {
+		printf("Usage: uuencode [infile] remotefile\n");
+		exit(2);
+	}
+
+#if CPM
+	mode = 0666; 
+#else
+	/* figure out the input file mode */
+	fstat(fileno(in), &sbuf);
+	mode = sbuf.st_mode & 0777;
+#endif
+
+printf("begin %o %s\n", mode, argv[1]);
+
+	encode(in, stdout);
+
+	printf("end\n");
+	exit(0);
+}
+
+/*
+ * copy from in to out, encoding as you go along.
+ */
+void encode(FILE *in, FILE *out)
+{
+	char buf[80];
+	int i, n;
+
+	for (;;) {
+		/* 1 (up to) 45 character line */
+		n = fr(in, buf, 45);
+		putc(ENC(n), out);
+
+		for (i=0; i<n; i += 3)
+			outdec(&buf[i], out);
+
+		putc('\n', out);
+		if (n <= 0)
+			break;
+	}
+}
+
+/*
+ * output one group of 3 bytes, pointed at by p, on file f.
+ */
+void outdec(char *p, FILE *f)
+{
+	int c1, c2, c3, c4;
+
+	c1 = *p >> 2;
+	c2 = (*p << 4) & 060 | (p[1] >> 4) & 017;
+	c3 = (p[1] << 2) & 074 | (p[2] >> 6) & 03;
+	c4 = p[2] & 077;
+	putc(ENC(c1), f);
+	putc(ENC(c2), f);
+	putc(ENC(c3), f);
+	putc(ENC(c4), f);
+}
+
+/* fr: like read but stdio */
+int
+fr(FILE *fd, char *buf, int cnt)
+{
+	int c, i;
+
+	for (i=0; i<cnt; i++) {
+		c = getc(fd);
+		if (c == EOF)
+			return(i);
+		buf[i] = c;
+	}
+	return (cnt);
+}
+
+
+#if CPM
+int junk() {
+  char **argv;
+  int argc;
+
+  if(argc == 1) {
+    argv = _getargs(0, "argtest");
+    argc = _argc_;
+  }
+}
+#endif
+
