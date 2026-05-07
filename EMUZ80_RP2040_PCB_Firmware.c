@@ -69,7 +69,7 @@ const size_t boot_size = sizeof(boot);
 #include "bios01.h"     // BIOSコード
 #include "ccp_bdos.h" // CCP BDOSコード
 #include "cpm22_1.h"  // CPM 2.2 Disk Image (Drive A: IBM 8" SD)
-#if 1
+#if 0
 #include "cpm22_disk1.h"    // CPM 2.2 Disk Image (Drive B: IBM 8" HD)
 #include "cpm22_tp301a.h"   // CPM 2.2 Disk Image (Drive C: IBM 8" SD)
 #include "cpm22_z80forth.h" // CPM 2.2 Disk Image (Drive D: IBM 8" SD)
@@ -78,9 +78,9 @@ const size_t boot_size = sizeof(boot);
 
 // ====================== 仮想ディスク定義 ======================
 // cpm2c.pyで生成された各ROM配列を一つのテーブルにまとめる
-#define ROMDISK_SIZE                                                           \
-  (256 * 1024) // (128 * 26 * 77 = 256,256 / 256 * 1024 = 262,144)
-const uint8_t *const rom_disks[] = {cpm22_1, cpm22_disk1, tp301a, z80forth};
+#define ROMDISK_SIZE (256 * 1024) // (128*26*77=256,256 / 256*1024=262,144)
+// const uint8_t *const rom_disks[] = {cpm22_1, cpm22_disk1, tp301a, z80forth};
+const uint8_t *const rom_disks[] = {cpm22_1, cpm22_1, cpm22_1, cpm22_1};
 
 // B: 仮想RAMディスク (Read/Write) - 十分なサイズを確保
 #define RAMDISK_SIZE (128 * 1024) // 128KB 262,144 (128*26*39)=256256
@@ -108,29 +108,68 @@ static int64_t reset_off_callback(alarm_id_t id, void *user_data) {
   return 0;               // ONE_SHOT
 }
 
-// --- Helper: Set PWM Frequency in Hz (Integer only) ---
-void set_pwm_freq(uint pin, uint32_t freq) {
-  uint slice_num = pwm_gpio_to_slice_num(pin);
+// ====================== Z80 CLK PWM 制御 ======================
+static uint clk_pwm_slice_num;
+static uint clk_pwm_channel;
+static bool clk_pwm_initialized = false;
+static uint32_t current_clk_freq = 0;
+
+static void clk_pwm_init(void) {
+  clk_pwm_slice_num = pwm_gpio_to_slice_num(CLK_PIN);
+  clk_pwm_channel = pwm_gpio_to_channel(CLK_PIN);
+  gpio_set_function(CLK_PIN, GPIO_FUNC_PWM);
+
+  pwm_config cfg = pwm_get_default_config();
+  pwm_config_set_clkdiv(&cfg, 1.0f);
+  pwm_config_set_wrap(&cfg, 0);
+  pwm_init(clk_pwm_slice_num, &cfg, false);
+  pwm_set_chan_level(clk_pwm_slice_num, clk_pwm_channel, 0);
+
+  clk_pwm_initialized = true;
+}
+
+static void clk_pwm_set_frequency(uint32_t freq_hz) {
+  if (!clk_pwm_initialized) {
+    clk_pwm_init();
+  }
+
   uint32_t sys_clk = clock_get_hz(clk_sys);
 
   float clkdiv = 1.0f;
-  uint32_t wrap = (sys_clk / freq) - 1;
+  uint32_t wrap = (sys_clk / freq_hz) - 1;
 
   if (wrap > 65535) {
-    // wrap が最大値を越える場合、clkdivを調整
-    clkdiv = (float)sys_clk / (freq * 65536LL);
+    clkdiv = (float)sys_clk / (freq_hz * 65536LL);
     if (clkdiv > 255.9375f) {
       clkdiv = 255.9375f;
     }
-    wrap = (uint32_t)((float)sys_clk / (freq * clkdiv)) - 1;
+    wrap = (uint32_t)((float)sys_clk / (freq_hz * clkdiv)) - 1;
     if (wrap > 65535) {
       wrap = 65535;
     }
   }
 
-  pwm_set_clkdiv(slice_num, clkdiv);
-  pwm_set_wrap(slice_num, wrap);
-  pwm_set_gpio_level(pin, (wrap + 1) / 2);
+  pwm_config cfg = pwm_get_default_config();
+  pwm_config_set_clkdiv(&cfg, clkdiv);
+  pwm_config_set_wrap(&cfg, (uint16_t)wrap);
+  pwm_init(clk_pwm_slice_num, &cfg, false);
+  pwm_set_chan_level(clk_pwm_slice_num, clk_pwm_channel, (wrap + 1) / 2);
+
+  current_clk_freq = freq_hz;
+}
+
+static inline void clk_pwm_output_on(void) {
+  pwm_set_enabled(clk_pwm_slice_num, true);
+}
+
+static inline void clk_pwm_output_off(void) {
+  pwm_set_enabled(clk_pwm_slice_num, false);
+}
+
+static void init_clk_pwm(uint32_t freq_hz) {
+  clk_pwm_init();
+  clk_pwm_set_frequency(freq_hz);
+  clk_pwm_output_on();
 }
 
 uint sm_trg = 0;
@@ -240,7 +279,8 @@ void init_disk_dma(void) {
 }
 
 // --- Main Emulation Loop ---
-__attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
+// __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
+void __time_critical_func(emu_loop)(void) {
   PIO pio = pio0;
   uint count = 0;
   uint8_t data_byte = 0;
@@ -266,35 +306,43 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
     if (!(agpio & mreq_mask)) { // MREQ=0 メモリアクセス
       if (!(agpio & wr_mask)) { // MREQ=0, WR=0  Memory-Write
         data_byte = (uint8_t)(agpio >> DATA_BASE);
-        //        if (adrs_word >= 0x8000) {
         memory[adrs_word] = data_byte;
-        //        }
       } else { // MREQ=0, WR=1  Memory-Read (not Write)
         data_byte = memory[adrs_word];
         pio_sm_put_blocking(pio, sm_emu, data_byte);
       }
     } else { // MREQ=1  I/Oアクセス
+      clk_pwm_output_off(); // Z80クロック停止
       uint ioadrs = adrs_word & 0xFF;
       if (!(agpio & wr_mask)) { // MREQ=1, WR=0  I/O-Write (not Memory-access)
         data_byte = (uint8_t)(agpio >> DATA_BASE);
-        if (ioadrs == 0x01) { // CONOUT : ポート1
+        switch (ioadrs) {
+        case 0x01: { // CONOUT : ポート1
           uint8_t next = (uart_tx_head + 1) % UART_TX_BUF_SIZE;
           if (next != uart_tx_tail) {
             uart_tx_buf[uart_tx_head] = data_byte;
             uart_tx_head = next;
           }
           // 満杯時は文字を捨てる
-        } else if (ioadrs == 0x0A) { // 10:0x0A : ドライブ選択
+          break;
+        }
+        case 0x0A: // 10:0x0A : ドライブ選択
           current_drive = data_byte;
-        } else if (ioadrs == 0x0B) { // 11:0x0B : トラック選択
+          break;
+        case 0x0B: // 11:0x0B : トラック選択
           current_track = data_byte;
-        } else if (ioadrs == 0x0C) { // 12:0x0C : セクタ選択
+          break;
+        case 0x0C: // 12:0x0C : セクタ選択
           current_sector = data_byte;
-        } else if (ioadrs == 0x0D) { // 13:0x0D:FDCOPコマンド(0=Read,1=Write)
+          break;
+        case 0x0D: { // 13:0x0D:FDCOPコマンド(0=Read,1=Write)
           // ------------------------------------------------------------------
           // READ / WRITE 処理 (ioadrs == 0x0D 内)
+          // DMA設定が重いため、処理中はZ80クロックを停止して高速化
           // ------------------------------------------------------------------
+          // clk_pwm_output_off(); // Z80クロック停止
           read_write = data_byte;
+          printf("0D:FDCOP R/W:%d DRV:%d TRK:%d SEC:%d\n", read_write, current_drive, current_track, current_sector);
           uint16_t dma_addr_z80 = ((uint16_t)dma_addr_high << 8) | dma_addr_low;
           // オフセット計算 (128バイト * (トラック * 26 + セクタ-1))
           uint32_t logical_sector =
@@ -313,8 +361,8 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
               src = rom_disks[current_drive];
               max_size = ROMDISK_SIZE;       // 256 * 1024
             } else if (current_drive == 8) { // I: (ROM 650KB)
-              src = cpm22_htc;
-              max_size = cpm22_htc_len;
+            //  src = cpm22_htc;
+            //  max_size = cpm22_htc_len;
             } else if (current_drive == 9) { // J: (RAM 128KB)
               src = ramdisk;
               max_size = RAMDISK_SIZE;
@@ -376,39 +424,53 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
               }
             }
           }
-        } else if (ioadrs == 0x0F) { // 15:0x0F : DMAアドレス
+          // clk_pwm_output_on(); // Z80クロック再開
+          break;
+        }
+        case 0x0F: // 15:0x0F : DMAアドレス
           dma_addr_low = data_byte;
-        } else if (ioadrs == 0x10) { // 16:0x10 : DMAアドレス
+          break;
+        case 0x10: // 16:0x10 : DMAアドレス
           dma_addr_high = data_byte;
-        } else if (ioadrs == 0x30) { // 0x30 : PPI PA
+          break;
+        case 0x30: // 0x30 : PPI PA
           // ==== ここから先はSIO直叩き（最速） ====
           if (data_byte & 1) {
             sio_hw->gpio_set = (1u << PA0_PIN); // PA b0 ON (GPIO27)
           } else {
             sio_hw->gpio_clr = (1u << PA0_PIN); // PA b0 OFF (GPIO27)
           }
+          break;
+        default:
+          break;
         }
       } else {                   // MREQ=1, WR=1  I/O-Read (not Memory-access)
-        if (ioadrs == 0x00) {    // === ポート0 : CONSTA ===
+        switch (ioadrs) {
+        case 0x00: // === ポート0 : CONSTA ===
           data_byte = uart_stat; // 0:not ready, 0xFF:ready
-        } else if (ioadrs == 0x01) { // === ポート1 : CONIN ===
+          break;
+        case 0x01: // === ポート1 : CONIN ===
           data_byte = uart_rxdata;
           uart_stat = 0;
-        } else if (ioadrs == 0x09) { // ← 新規追加：DMA完了ステータスポート
+          break;
+        case 0x09: // DMA完了ステータスポート
           if (dma_busy && dma_channel_is_busy(disk_dma_chan)) {
             data_byte = 0xFF; // まだ転送中（Busy）
           } else {
             data_byte = 0x00; // 転送完了（Ready）
             dma_busy = false;
           }
-        } else if (ioadrs == 0x0E) { // 14:0x0E : FDCステータス(0:OK/1:NG)
-                                     //          data_byte = 0;
+          break;
+        case 0x0E: // 14:0x0E : FDCステータス(0:OK/1:NG)
           data_byte = fdc_status;
-        } else {
+          break;
+        default:
           data_byte = (uint8_t)(agpio >> DATA_BASE);
+          break;
         }
         pio_sm_put_blocking(pio, sm_emu, data_byte);
       }
+      clk_pwm_output_on(); // Z80クロック再開
     }
     if (false) { // デバッグ用 Z80_freq = 20  (20Hz) で使用する
       printf("%05u MREQ:%d WR:%d RD:%d ADRS:%04X DATA:%02X\n", count,
@@ -427,22 +489,23 @@ int main() {
 
   if (true) { // 高速 コア電圧1.3V クロック 266MHz 設定
     sleep_ms(100);
-    // sysvolt = VREG_VOLTAGE_1_30;
-    sysvolt = VREG_VOLTAGE_1_25;
+    sysvolt = VREG_VOLTAGE_1_30;
+    // sysvolt = VREG_VOLTAGE_1_25;
     vreg_set_voltage(sysvolt);
     sleep_ms(100);
     // sysclk = 400000;
     // sysclk = 360000; 
-    // sysclk = 340000; 
-    // sysclk = 320000; 
-    // sysclk = 300000; 
+    // sysclk = 336000; 
+    // sysclk = 312000; // 1.3V 6MHz NG
+     sysclk = 300000;  // 1.3V 6MHz OK
     // sysclk = 280000; 
-    sysclk = 266000; 
+    // sysclk = 266000; 
     // sysclk = 200000;
     if (set_sys_clock_khz(sysclk, true)) {
 #if PICO_RP2040
       // ssi_hw->baudr = 2; // 400MHz / 4 = 100MHz
-      ssi_hw->baudr = 4; // 266MHz / 4 = 66.5MHz
+      ssi_hw->baudr = 4; // 300MHz / 4 = 75MHz OK
+      // ssi_hw->baudr = 5; // 300MHz / 5 = 60MHz
 #endif
     }
   } else { // 標準　コア電圧 1.15V クロック 200MHz 設定
@@ -533,10 +596,10 @@ int main() {
   // int Z80_freq = 9000000; // 9MHz
   // int Z80_freq = 8000000; // 8MHz
   // int Z80_freq = 7000000; // 7MHz
-  int Z80_freq = 6000000; // 6MHz
+  // int Z80_freq = 6000000; // 6MHz
   // int Z80_freq = 5000000; // 5MHz
   // int Z80_freq = 4000000; // 4MHz
-  // int Z80_freq = 2500000; // 2.5MHz
+   int Z80_freq = 2500000; // 2.5MHz
   // int Z80_freq = 1000000; // 1MHz
   // int Z80_freq = 800000; // 700kHz
   // int Z80_freq = 700000; // 700kHz
@@ -549,10 +612,7 @@ int main() {
   // int Z80_freq = 100000; // 100kHz
   // int Z80_freq = 10000; // 10kHz
   //  int Z80_freq = 20; // 20Hz
-  gpio_set_function(CLK_PIN, GPIO_FUNC_PWM);
-  uint slice_num = pwm_gpio_to_slice_num(CLK_PIN);
-  set_pwm_freq(CLK_PIN, Z80_freq);
-  pwm_set_enabled(slice_num, true);
+  init_clk_pwm(Z80_freq);
   printf("Z80 CLK-ON %fMHz\n", Z80_freq / 1000000.0);
 
   // 1秒後にRESETを解除
@@ -565,7 +625,7 @@ int main() {
   gpio_put(RESET_PIN, 0);
   printf("RESET-ON\n");
   sleep_ms(100);
-  pwm_set_enabled(slice_num, false);
+  clk_pwm_output_off();
   clk_on_off(10);
   printf("Exited.\n");
 
