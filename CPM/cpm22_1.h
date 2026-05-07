@@ -1,4 +1,4 @@
-/* cpm22_1.h - Generated from "cpm22-1.dsk" for Drive A: (IBM 8" SD) */
+/* Generated from "cpm22_1_EMUZ80_AE-RP2400.dsk" for Drive A: (IBM 8" SD) */
 
 #include <pico.h>
 #include <stddef.h>

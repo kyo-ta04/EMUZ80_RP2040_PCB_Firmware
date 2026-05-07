@@ -37,7 +37,7 @@ pico_sdk_init()
 
 add_executable(EMUZ80_RP2040_PCB_Firmware
     EMUZ80_RP2040_PCB_Firmware.c
-    bios01.c
+    CPM/bios01.c
     CPM/ccp_bdos.c
     CPM/cpm22_1.c
     CPM/cpm22_disk1.c

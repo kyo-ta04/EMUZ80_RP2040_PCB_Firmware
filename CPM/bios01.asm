@@ -152,37 +152,12 @@ DPBJ: DEFW      26              ; SPT  : sectors per track = 26
         DEFW    0000H           ; CKS  = 0 (RAM disk)
         DEFW    0000H           ; OFF  = 0
 
-;;
-;;	fixed data tables for 4MB harddisks
-;;
-;;	disk parameter header
-;HDB1:	DEFW	0000H,0000H
-;	DEFW	0000H,0000H
-;	DEFW	DIRBF,HDBLK
-;	DEFW	CHKHD1,ALLHD1
-;HDB2:	DEFW	0000H,0000H
-;	DEFW	0000H,0000H
-;	DEFW	DIRBF,HDBLK
-;	DEFW	CHKHD2,ALLHD2
-;;
-;;       disk parameter block for harddisk
-;;
-;HDBLK:  DEFW    128		;sectors per track
-;	DEFB    4		;block shift factor
-;	DEFB    15		;block mask
-;	DEFB    0		;extent mask
-;	DEFW    2039		;disk size-1
-;	DEFW    1023		;directory max
-;	DEFB    255		;alloc 0
-;	DEFB    255		;alloc 1
-;	DEFW    0		;check size
-;	DEFW    0		;track offset
 
 ;
 ;	messages
 ;
-SIGNON: DEFM	'64K CP/M Vers. 2.2 (Z80 CBIOS V1.2 for Z80SIM, '
-	DEFM	'Copyright 1988-2007 by Udo Munk)'
+SIGNON: DEFM	'64K CP/M Vers.2.2(EMUZ80_AE-RP2400 BIOS V1.2, '
+	DEFM	'Copyright 2026 by @DragonballEZ)'
 	DEFB	13,10,0
 ;
 LDERR:	DEFM	'BIOS: error booting'
@@ -335,37 +310,9 @@ READER: IN	A,(AUXDAT)
 ;
 HOME:	LD	C,0		;select track 0
 	JP	SETTRK		;we will move to 00 on first read/write
-;;
-;;	select disk given by register C
-;;
-; SELDSK: LD	HL,0000H	;error return code
-; 	LD	A,C
-;	CP	4		;FD drive 0-3?
-;	JP	C,SELFD		;go
-;	CP	8		;harddisk 1?
-;	JP	Z,SELHD1	;go
-;	CP	9		;harddisk 2?
-;	JP	Z,SELHD2	;go
-;	RET			;no, error
-;;	disk number is in the proper range
-;;	compute proper disk parameter header address
-;SELFD:	OUT	(FDCD),A	;select disk drive
-;	LD	L,A		;L=disk number 0,1,2,3
-;	ADD	HL,HL		;*2
-;	ADD	HL,HL		;*4
-;	ADD	HL,HL		;*8
-;	ADD	HL,HL		;*16 (size of each header)
-;	LD	DE,DPBASE
-;	ADD	HL,DE		;HL=.dpbase(diskno*16)
-;	RET
-;SELHD1:	LD	HL,HDB1		;dph harddisk 1
-;	JP	SELHD
-;SELHD2:	LD	HL,HDB2		;dph harddisk 2
-;SELHD:	OUT	(FDCD),A	;select harddisk drive
-;	RET
 
 ; =============================================================
-; SELDSK - Select Disk (Modified for 2-Drive System)
+; SELDSK - Select Disk (Modified for 6-Drive System)
 ; =============================================================
 SELDSK: LD	HL,0000H	; Error return code
  	LD	A,C
@@ -392,23 +339,6 @@ SELHD1:	LD	HL,HDB1		;dph harddisk 1
 SELHD2:	LD	HL,HDB2		;dph harddisk 2
 SELHD:	OUT	(FDCD),A	;select harddisk drive
 	RET
-
-;---------------------
-;	LD	A,C
-;	CP	9				; FD drive A-J? (0-8)
-;	RET	NC				; Error	
-;	OUT	(FDCD),A		; Select disk drive for RP2040
-;	; DPH Address Calculation: HL = DPBASE + (A * 16)
-;	LD      L, A
-;	LD      H, 0
-;	ADD     HL, HL          ; *2
-;	ADD     HL, HL          ; *4
-;	ADD     HL, HL          ; *8
-;	ADD     HL, HL          ; *16
-;	LD      DE, DPBASE
-;	ADD     HL, DE
-;	RET
-;
 
 ;
 ;	set track given by register c
