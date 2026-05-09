@@ -5,10 +5,8 @@
 //
 // SPDX-License-Identifier: MIT
 // See LICENSE file for details.
-//
-// ** For EMUZ80_RP2040_PCB! **
 
-#include "AE-RP2040.pio.h"
+#include "emuz80_rp/config.h"
 #include "hardware/clocks.h"
 #include "hardware/pio.h"
 #include "hardware/pwm.h"
@@ -26,26 +24,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-// GPIO Pin Definitions
-#define ADRS_BASE 0  // GP0..15: Address Bus A0-15
-#define DATA_BASE 16 // GP16..23: Data Bus
-// #define IORQ_PIN 24  // GP24: IORQ
-#define MREQ_PIN 24 // GP24: MREQ
-#define RD_PIN 25   // GP25: RD
-#define WR_PIN 26   // GP26: WR
-// #define WAIT_PIN 27  // GP27: WAIT
-#define PA0_PIN 27   // GP27: PPI PA b0
-#define RESET_PIN 28 // GP28: RESET
-#define CLK_PIN 29   // GP29: CLK
-
 // Z80用メモリー
-#define MEMORY_SIZE 65536 // 64KB
 static uint8_t memory[MEMORY_SIZE] = {[0 ... MEMORY_SIZE - 1] = 0xFF};
 volatile bool stop_flg = false;
 
 // UART/USB 共有バッファ
-#define UART_TX_BUF_SIZE 256
-
 volatile uint8_t uart_tx_buf[UART_TX_BUF_SIZE];
 volatile uint16_t uart_tx_head = 0; // コア1 (Z80側) が更新
 volatile uint16_t uart_tx_tail = 0; // コア0 (UART側) が更新
@@ -55,7 +38,7 @@ volatile uint8_t uart_stat = 0;
 
 #define UART_RX_READY 0xFF
 
-
+#if defined(CONFIG_ROM_CPM)
 // BOOT ROM
 const unsigned char boot[] = {
     0xC3,
@@ -63,7 +46,14 @@ const unsigned char boot[] = {
     0xFA, // JP BIOS
 };
 const size_t boot_size = sizeof(boot);
+#endif
+#if defined(CONFIG_ROM_BASIC)
+const unsigned char emuz80_binary[] = {
+#include "roms/emubasic.inc"
+};
+#endif
 
+#if defined(CONFIG_ROM_CPM)
 // ====================== ROM/BIOSデータ (extern宣言) ======================
 // 各データは個別の .c ファイルでコンパイルされる
 #include "rom_data.h"
@@ -79,6 +69,7 @@ const uint8_t *const rom_disks[] = {romdisk, cpm22_disk1, tp301a, z80forth};
 static uint8_t __attribute__((aligned(4))) ramdisk[RAMDISK_SIZE] = {
     [0 ... RAMDISK_SIZE - 1] = 0xE5 // E5で埋めて未使用にする
 };
+#endif
 
 //
 // --- Helper: Manual Clock Pulse ---
@@ -125,71 +116,82 @@ void set_pwm_freq(uint pin, uint32_t freq) {
   pwm_set_gpio_level(pin, (wrap + 1) / 2);
 }
 
-uint sm_trg = 0;
-uint sm_emu = 1;
-uint sm_dirsL = 2;
-uint sm_dirsH = 3;
+// PIO0
+uint sm_trg_wr = 0;
+uint sm_trg_rd = 1;
+uint sm_emu = 2;
+PIO pio_emu = pio0;
+// PIO1
+uint sm_dirsL = 0;
+uint sm_dirsH = 1;
+uint sm_data_out = 2;
+PIO pio_data_out = pio1;
 
 // --- PIO Helpers ---
 void pio_init_bus() {
-  PIO pio = pio0;
+  PIO pio;
 
-  // SM0: trg_rw2 (Detection of falling edge on RD/WR)
-  uint offset_trg = pio_add_program(pio, &trg_rw2_program);
-  pio_sm_config c_trg = trg_rw2_program_get_default_config(offset_trg);
+  // PIO 0
+  pio = pio0;
 
-  // SM1: m_emu (Address/Data handling)
+  // SM: trg_wr (Detection of falling edge on WR)
+  uint offset_trg_wr = pio_add_program(pio, &trg_rw_program);
+  pio_sm_config c_trg_wr = trg_rw_program_get_default_config(offset_trg_wr);
+#if defined(WR_PIN) && (WR_PIN < 30)
+  sm_config_set_in_pins(&c_trg_wr, WR_PIN);
+#else
+  sm_config_set_in_pins(&c_trg_wr, IORQ_PIN);
+#endif
+  pio_sm_init(pio, sm_trg_wr, offset_trg_wr, &c_trg_wr);
+  pio_sm_set_enabled(pio, sm_trg_wr, true);
+
+  // SM: trg_rd (Detection of falling edge on RD)
+  uint offset_trg_rd = pio_add_program(pio, &trg_rw_program);
+  pio_sm_config c_trg_rd = trg_rw_program_get_default_config(offset_trg_rd);
+#if defined(WR_PIN) && (WR_PIN < 30)
+  sm_config_set_in_pins(&c_trg_rd, RD_PIN);
+#else
+  sm_config_set_in_pins(&c_trg_rd, MREQ_PIN);
+#endif
+  pio_sm_init(pio, sm_trg_rd, offset_trg_rd, &c_trg_rd);
+  pio_sm_set_enabled(pio, sm_trg_rd, true);
+
+  // SM: m_emu (Address/Data handling)
   uint offset_emu = pio_add_program(pio, &m_emu_program);
   pio_sm_config c_emu = m_emu_program_get_default_config(offset_emu);
-
-  // SM2/3: d_pindirs (Direction toggle)
-  uint offset_dirs = pio_add_program(pio, &d_pindirs_program);
-  pio_sm_config c_dirs = d_pindirs_program_get_default_config(offset_dirs);
-  pio_sm_config c_dirsH = d_pindirs_program_get_default_config(offset_dirs);
-
-  // GPIOをPIO用に初期化 GP0-15(A0-15), GP16-23(D0-7), GP24(MREQ/IORQ),
-  // GP25(RD), GP26(WR), GP27(WAIT), GP28(RESET), GP29(CLK)
-  for (int i = 0; i <= 23; i++) {
-    pio_gpio_init(pio, i);
-  }
-  //  pio_gpio_init(pio, IORQ_PIN); // GP24(IORQ)
-  pio_gpio_init(pio, MREQ_PIN); // GP24(MREQ)
-  pio_gpio_init(pio, RD_PIN);   // GP25(RD)
-  pio_gpio_init(pio, WR_PIN);   // GP26(WR)
-  //  pio_gpio_init(pio, WAIT_PIN); // GP27(WAIT)
-
-  // SM0: trg_rw2 (Detection of falling edge on RD/WR)
-  sm_config_set_in_pins(&c_trg, RD_PIN); // base = GP25 (RD, WR)
-  pio_sm_init(pio, sm_trg, offset_trg, &c_trg);
-  pio_sm_set_enabled(pio, sm_trg, true);
-
-  // SM1: m_emu (Address/Data handling)
-  sm_config_set_in_pins(&c_emu, 0);             // base = GP0
-  sm_config_set_out_pins(&c_emu, DATA_BASE, 8); // base = GP16, cnt = 8
-  sm_config_set_jmp_pin(&c_emu, RD_PIN);
-
-  // D0-7ピン初期化(入力)
-  pio_sm_set_consecutive_pindirs(pio, sm_emu, DATA_BASE, 8, false);
-  // シフトレジスタの設定 (Auto Push/Pull 有効化)
-  // ISRのシフト方向, auto_push=true, threshold=30
-  sm_config_set_in_shift(&c_emu, false, true, 30);
-  // OSRのシフト方向, auto_pull=true, threshold=8
-  sm_config_set_out_shift(&c_emu, true, true, 8);
-
+  sm_config_set_in_pins(&c_emu, 0);
+  sm_config_set_in_shift(&c_emu, false, false, 30);  // shift left, auto_push=false, threshold=30
   pio_sm_init(pio, sm_emu, offset_emu, &c_emu);
   pio_sm_set_enabled(pio, sm_emu, true);
 
-  // SM2/3: d_pindirs (Direction toggle)
-  sm_config_set_set_pins(&c_dirs, DATA_BASE, 4); // GP0..3
-  sm_config_set_jmp_pin(&c_dirs, RD_PIN);
-  pio_sm_init(pio, sm_dirsL, offset_dirs, &c_dirs);
+  // PIO 1
+  pio = pio1;
+  for (int i = 0; i < 8; i++) {
+    pio_gpio_init(pio, DATA_BASE + i);
+  }
 
-  sm_config_set_set_pins(&c_dirsH, DATA_BASE + 4, 4); // GP4..7
-  sm_config_set_jmp_pin(&c_dirsH, RD_PIN);
-  pio_sm_init(pio, sm_dirsH, offset_dirs, &c_dirsH);
-
+  // SM: dirsL
+  uint offset_dirs = pio_add_program(pio, &d_pindirs_program);
+  pio_sm_config c_dirsL = d_pindirs_program_get_default_config(offset_dirs);
+  sm_config_set_set_pins(&c_dirsL, DATA_BASE, 4); // D0..D3
+  sm_config_set_in_pins(&c_dirsL, RD_PIN);
+  pio_sm_init(pio, sm_dirsL, offset_dirs, &c_dirsL);
   pio_sm_set_enabled(pio, sm_dirsL, true);
+
+  // SM: dirsH
+  pio_sm_config c_dirsH = d_pindirs_program_get_default_config(offset_dirs);
+  sm_config_set_set_pins(&c_dirsH, DATA_BASE + 4, 4); // D4..D7
+  sm_config_set_in_pins(&c_dirsH, RD_PIN);
+  pio_sm_init(pio, sm_dirsH, offset_dirs, &c_dirsH);
   pio_sm_set_enabled(pio, sm_dirsH, true);
+
+  // SM: data_out (Output to data bus)
+  uint offset_data_out = pio_add_program(pio, &data_out_program);
+  pio_sm_config c_data_out = data_out_program_get_default_config(offset_data_out);
+  sm_config_set_out_pins(&c_data_out, DATA_BASE, 8);
+  sm_config_set_out_shift(&c_data_out, true, false, 8);  // shift right, auto_pull=false, threshold=8
+  pio_sm_init(pio, sm_data_out, offset_data_out, &c_data_out);
+  pio_sm_set_enabled(pio, sm_data_out, true);
 }
 
 // --- UART Task (Core 0) ---
@@ -231,9 +233,33 @@ void init_disk_dma(void) {
   }
 }
 
+static void wait_wr_active_and_read_data(const uint32_t gpio, uint8_t *data_out)
+{
+#if defined(WR_PIN) && (WR_PIN < 30)
+    if (!(gpio & (1u << WR_PIN))) {
+        if (data_out) {
+            *data_out = (uint8_t)((gpio >> DATA_BASE) & 0xffu);
+        }
+        return;
+    }
+#endif
+    const uint32_t timeout_loops = 100000u;
+    for (uint32_t i = 0; i < timeout_loops; i++) {
+        if (!gpio_get(WR_PIN)) {
+            uint32_t v = gpio_get_all();
+            if (data_out) {
+                *data_out = (uint8_t)((v >> DATA_BASE) & 0xffu);
+            }
+            return;
+        }
+
+        tight_loop_contents();
+    }
+    printf("%s: timeout\n", __func__);
+}
+
 // --- Main Emulation Loop ---
 __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
-  PIO pio = pio0;
   uint count = 0;
   uint8_t data_byte = 0;
 
@@ -250,25 +276,38 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
     // バスライン取得
     // GP0-29(A0-15=GP0-15,D0-7=GP16-23,MREQ=GP24,RD=GP25,WR=GP26,WAIT=GP27,RESET=GP28,CLK=GP29)
     const uint32_t mreq_mask = (1u << MREQ_PIN);
+#if defined(WR_PIN) && (WR_PIN < 30)
     const uint32_t wr_mask = (1u << WR_PIN);
-    uint32_t agpio = pio_sm_get_blocking(pio, sm_emu);
-    uint32_t adrs_word = (agpio & 0xFFFF);
+#else
+    const uint32_t rfsh_mask = (1u << RFSH_PIN);
+#endif
+    const uint32_t rd_mask = (1u << RD_PIN);
+    uint32_t agpio = pio_sm_get_blocking(pio_emu, sm_emu);
+#if defined(ADRS_LOW_BASE)
+    uint32_t adrs_word = ((agpio >> ADRS_LOW_BASE) & 0xFF) | ((agpio >> (ADRS_HIGH_BASE - 8)) & 0xFF00);
+#else
+    uint32_t adrs_word = ((agpio >> ADRS_BASE) & 0xFFFF);
+#endif
 
     count++;
     if (!(agpio & mreq_mask)) { // MREQ=0 メモリアクセス
+#if defined(WR_PIN) && (WR_PIN < 30)
       if (!(agpio & wr_mask)) { // MREQ=0, WR=0  Memory-Write
-        data_byte = (uint8_t)(agpio >> DATA_BASE);
+#else
+      if ((agpio & rd_mask) && (agpio & rfsh_mask)) { // MREQ=0, RD=1, RFSH=1 Memory-Write
+#endif
+        wait_wr_active_and_read_data(agpio, &data_byte);
         //        if (adrs_word >= 0x8000) {
         memory[adrs_word] = data_byte;
         //        }
-      } else { // MREQ=0, WR=1  Memory-Read (not Write)
+      } else if (!(agpio & rd_mask)) { // MREQ=0, RD=0 Memory-Read
         data_byte = memory[adrs_word];
-        pio_sm_put_blocking(pio, sm_emu, data_byte);
+        pio_sm_put_blocking(pio_data_out, sm_data_out, data_byte);
       }
     } else { // MREQ=1  I/Oアクセス
       uint ioadrs = adrs_word & 0xFF;
-      if (!(agpio & wr_mask)) { // MREQ=1, WR=0  I/O-Write (not Memory-access)
-        data_byte = (uint8_t)(agpio >> DATA_BASE);
+      if (agpio & rd_mask) { // MREQ=1, RD=1  I/O-Write (not Memory-access)
+        wait_wr_active_and_read_data(agpio, &data_byte);
         if (ioadrs == 0x01) { // CONOUT : ポート1
           uint8_t next = (uart_tx_head + 1) % UART_TX_BUF_SIZE;
           if (next != uart_tx_tail) {
@@ -283,6 +322,7 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
         } else if (ioadrs == 0x0C) { // 12:0x0C : セクタ選択
           current_sector = data_byte;
         } else if (ioadrs == 0x0D) { // 13:0x0D:FDCOPコマンド(0=Read,1=Write)
+#if defined(ROMDISK_SIZE)
           // ------------------------------------------------------------------
           // READ / WRITE 処理 (ioadrs == 0x0D 内)
           // ------------------------------------------------------------------
@@ -368,17 +408,20 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
               }
             }
           }
+#endif  // ROMDISK_SIZE
         } else if (ioadrs == 0x0F) { // 15:0x0F : DMAアドレス
           dma_addr_low = data_byte;
         } else if (ioadrs == 0x10) { // 16:0x10 : DMAアドレス
           dma_addr_high = data_byte;
         } else if (ioadrs == 0x30) { // 0x30 : PPI PA
+#if defined(PA0_PIN)
           // ==== ここから先はSIO直叩き（最速） ====
           if (data_byte & 1) {
-            sio_hw->gpio_set = (1u << PA0_PIN); // PA b0 ON (GPIO27)
+            sio_hw->gpio_set = (1u << PA0_PIN); // PA b0 ON
           } else {
-            sio_hw->gpio_clr = (1u << PA0_PIN); // PA b0 OFF (GPIO27)
+            sio_hw->gpio_clr = (1u << PA0_PIN); // PA b0 OF
           }
+#endif
         }
       } else {                   // MREQ=1, WR=1  I/O-Read (not Memory-access)
         if (ioadrs == 0x00) {    // === ポート0 : CONSTA ===
@@ -399,13 +442,19 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
         } else {
           data_byte = (uint8_t)(agpio >> DATA_BASE);
         }
-        pio_sm_put_blocking(pio, sm_emu, data_byte);
+        pio_sm_put_blocking(pio_data_out, sm_data_out, data_byte);
       }
     }
     if (false) { // デバッグ用 Z80_freq = 20  (20Hz) で使用する
+#if defined(WR_PIN) && (WR_PIN < 30)
       printf("%05u MREQ:%d WR:%d RD:%d ADRS:%04X DATA:%02X\n", count,
              (agpio >> MREQ_PIN) & 1, (agpio >> WR_PIN) & 1,
              (agpio >> RD_PIN) & 1, adrs_word, (int)data_byte);
+#else
+      printf("%05u MREQ:%d RFSH:%d RD:%d ADRS:%04X DATA:%02X\n", count,
+             (agpio >> MREQ_PIN) & 1, (agpio >> RFSH_PIN) & 1,
+             (agpio >> RD_PIN) & 1, adrs_word, (int)data_byte);
+#endif
     }
   }
 }
@@ -455,30 +504,91 @@ int main() {
   sleep_ms(100);
 
   // // Z80用メモリー初期化
+#if defined(CONFIG_ROM_CPM)
   memcpy(memory + 0xE400, ccp_bdos, ccp_bdos_size);
   memcpy(memory + 0xFA00, bios01, bios01_size);
   memcpy(memory, boot, sizeof(boot));
+#endif
+#if defined(CONFIG_ROM_BASIC)
+  memcpy(memory, emuz80_binary, sizeof(emuz80_binary));
+#endif
 
-  // GPIO初期化 GP0-29
-  // A0-A15:GP0-15,D0-D7:GP16-23,IORQ:GP24,MREQ:GP24,RD:GP25,WR:GP26,WAIT:GP27,RESET:GP28,CLK:GP29
-  gpio_init_mask(0x0FFFFFFF);
-  for (int i = 0; i <= 23; i++) {
-    gpio_set_dir(i, GPIO_IN);
+  // GPIO初期化
+  // 入力: A0-A15,D0-D7,IORQ,MREQ,RD,WR,RFSH
+#if defined(ADRS_LOW_BASE)
+  for (int i = 0; i < 8; i++) {
+    gpio_init(ADRS_LOW_BASE + i);
+    gpio_set_dir(ADRS_LOW_BASE + i, GPIO_IN);
     //   gpio_pull_up(i);
   }
+#endif
+#if defined(ADRS_HIGH_BASE)
+  for (int i = 0; i < 8; i++) {
+    gpio_init(ADRS_HIGH_BASE + i);
+    gpio_set_dir(ADRS_HIGH_BASE + i, GPIO_IN);
+    //   gpio_pull_up(i);
+  }
+#endif
+#if defined(ADRS_BASE)
+  for (int i = 0; i < 16; i++) {
+    gpio_init(ADRS_BASE + i);
+    gpio_set_dir(ADRS_BASE + i, GPIO_IN);
+    //   gpio_pull_up(i);
+  }
+#endif
+  for (int i = 0; i < 8; i++) {
+    gpio_init(DATA_BASE + i);
+    gpio_set_dir(DATA_BASE + i, GPIO_IN);
+    //   gpio_pull_up(i);
+  }
+#if defined(IORQ_PIN)
+  gpio_init(IORQ_PIN);
+  gpio_set_dir(IORQ_PIN, GPIO_IN);
+#endif
+  gpio_init(MREQ_PIN);
+  gpio_set_dir(MREQ_PIN, GPIO_IN);
+  gpio_init(RD_PIN);
+  gpio_set_dir(RD_PIN, GPIO_IN);
+#if defined(WR_PIN)
+  gpio_init(WR_PIN);
+  gpio_set_dir(WR_PIN, GPIO_IN);
+#endif
+#if defined(RFSH_PIN)
+  gpio_init(RFSH_PIN);
+  gpio_set_dir(RFSH_PIN, GPIO_IN);
+#endif
 
-  // 他の制御ピン RESET:GP28 CLK:GP29
+  // 出力: RESET, WAIT, INT
   gpio_init(RESET_PIN);
   gpio_set_dir(RESET_PIN, GPIO_OUT);
   gpio_put(RESET_PIN, 0); // RESET ON
+#if defined(WAIT_PIN)
+  gpio_init(WAIT_PIN);
+  gpio_set_dir(WAIT_PIN, GPIO_OUT);
+  gpio_put(WAIT_PIN, 1); // WAIT disable
+#endif
+#if defined(INT_PIN)
+  gpio_init(INT_PIN);
+  gpio_set_dir(INT_PIN, GPIO_OUT);
+  gpio_put(INT_PIN, 1); // interrupt disable
+#endif
+
+  // VCC_5V_EN_PIN（Z80 側 5V 電源制御）
+#if defined(VCC_5V_EN_PIN)
+  gpio_init(VCC_5V_EN_PIN);
+  gpio_set_dir(VCC_5V_EN_PIN, GPIO_OUT);
+  gpio_put(VCC_5V_EN_PIN, 0); // OFF
+#endif
 
   // ====================== GPIO初期設定はC SDKで（超簡単・安全）
   // ======================
-  gpio_init(PA0_PIN); // ピン初期化（FUNCSEL = SIOに自動設定）GPIO27
+#if defined(PA0_PIN)
+  gpio_init(PA0_PIN); // ピン初期化（FUNCSEL = SIOに自動設定）
   gpio_set_dir(PA0_PIN, GPIO_OUT); // 出力方向に設定（SIOのOEも自動でON）
   gpio_put(PA0_PIN, 0);            // 初期値はOFF（任意）
+#endif
 
-  // printf("GPIO27 初期設定完了（SDK使用）→ 以後SIO直叩きでON/OFF\n");
+  // printf("GPIO 初期設定完了（SDK使用）→ 以後SIO直叩きでON/OFF\n");
   sleep_ms(100);
 
   // Initial CLK pulses (Python: CLK_OnOff(10))
@@ -489,6 +599,7 @@ int main() {
   sleep_ms(2000);
   // EMUZ80_RP2040_PCB
   printf("\n** For EMUZ80_RP2040_PCB! **\n");
+#if defined(CONFIG_ROM_CPM)
   printf("** z80pack - CP/M2.2 CCP+BDOS(E400H-F9FFH), BIOS-01(FA00H-FC2FH), "
          "BOOT(0000H-) **\n");
   printf("** DISK0 A: z80pack cpm2-1.dsk   **\n");
@@ -497,6 +608,7 @@ int main() {
   printf("** DISK3 D: cpm22_z80forth.dsk   **\n");
   printf("** DISK8 I: cpm22_htc.dsk(650KB) **\n");
   printf("** DISK9 J: RAMDISK (128KB)      **\n");
+#endif
 
   printf("\n-hit [Enter] in terminal-\n");
   while (getchar_timeout_us(100) == PICO_ERROR_TIMEOUT)
@@ -510,6 +622,11 @@ int main() {
     volt = 1.25;
   else if (sysvolt == VREG_VOLTAGE_1_30)
     volt = 1.30;
+
+#if defined(VCC_5V_EN_PIN)
+  // Z80 VCC 5V オン
+  gpio_put(VCC_5V_EN_PIN, 1); // ON
+#endif
 
   //  エミュレーション開始(core1)
   printf("AE-RP2040 Core:%0.2fV Clock:%uMHz\n", volt, sysclk / 1000);
