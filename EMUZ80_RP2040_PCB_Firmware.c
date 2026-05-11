@@ -91,29 +91,68 @@ static int64_t reset_off_callback(alarm_id_t id, void *user_data) {
   return 0;               // ONE_SHOT
 }
 
-// --- Helper: Set PWM Frequency in Hz (Integer only) ---
-void set_pwm_freq(uint pin, uint32_t freq) {
-  uint slice_num = pwm_gpio_to_slice_num(pin);
+// ====================== Z80 CLK PWM 制御 ======================
+static uint clk_pwm_slice_num;
+static uint clk_pwm_channel;
+static bool clk_pwm_initialized = false;
+static uint32_t current_clk_freq = 0;
+
+static void clk_pwm_init(void) {
+  clk_pwm_slice_num = pwm_gpio_to_slice_num(CLK_PIN);
+  clk_pwm_channel = pwm_gpio_to_channel(CLK_PIN);
+  gpio_set_function(CLK_PIN, GPIO_FUNC_PWM);
+
+  pwm_config cfg = pwm_get_default_config();
+  pwm_config_set_clkdiv(&cfg, 1.0f);
+  pwm_config_set_wrap(&cfg, 0);
+  pwm_init(clk_pwm_slice_num, &cfg, false);
+  pwm_set_chan_level(clk_pwm_slice_num, clk_pwm_channel, 0);
+
+  clk_pwm_initialized = true;
+}
+
+static void clk_pwm_set_frequency(uint32_t freq_hz) {
+  if (!clk_pwm_initialized) {
+    clk_pwm_init();
+  }
+
   uint32_t sys_clk = clock_get_hz(clk_sys);
 
   float clkdiv = 1.0f;
-  uint32_t wrap = (sys_clk / freq) - 1;
+  uint32_t wrap = (sys_clk / freq_hz) - 1;
 
   if (wrap > 65535) {
-    // wrap が最大値を越える場合、clkdivを調整
-    clkdiv = (float)sys_clk / (freq * 65536LL);
+    clkdiv = (float)sys_clk / (freq_hz * 65536LL);
     if (clkdiv > 255.9375f) {
       clkdiv = 255.9375f;
     }
-    wrap = (uint32_t)((float)sys_clk / (freq * clkdiv)) - 1;
+    wrap = (uint32_t)((float)sys_clk / (freq_hz * clkdiv)) - 1;
     if (wrap > 65535) {
       wrap = 65535;
     }
   }
 
-  pwm_set_clkdiv(slice_num, clkdiv);
-  pwm_set_wrap(slice_num, wrap);
-  pwm_set_gpio_level(pin, (wrap + 1) / 2);
+  pwm_config cfg = pwm_get_default_config();
+  pwm_config_set_clkdiv(&cfg, clkdiv);
+  pwm_config_set_wrap(&cfg, (uint16_t)wrap);
+  pwm_init(clk_pwm_slice_num, &cfg, false);
+  pwm_set_chan_level(clk_pwm_slice_num, clk_pwm_channel, (wrap + 1) / 2);
+
+  current_clk_freq = freq_hz;
+}
+
+static inline void clk_pwm_output_on(void) {
+  pwm_set_enabled(clk_pwm_slice_num, true);
+}
+
+static inline void clk_pwm_output_off(void) {
+  pwm_set_enabled(clk_pwm_slice_num, false);
+}
+
+static void init_clk_pwm(uint32_t freq_hz) {
+  clk_pwm_init();
+  clk_pwm_set_frequency(freq_hz);
+  clk_pwm_output_on();
 }
 
 // PIO0
@@ -305,6 +344,7 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
         pio_sm_put_blocking(pio_data_out, sm_data_out, data_byte);
       }
     } else { // MREQ=1  I/Oアクセス
+      clk_pwm_output_off();
       uint ioadrs = adrs_word & 0xFF;
       if (agpio & rd_mask) { // MREQ=1, RD=1  I/O-Write (not Memory-access)
         wait_wr_active_and_read_data(agpio, &data_byte);
@@ -444,6 +484,7 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
         }
         pio_sm_put_blocking(pio_data_out, sm_data_out, data_byte);
       }
+      clk_pwm_output_on();
     }
     if (false) { // デバッグ用 Z80_freq = 20  (20Hz) で使用する
 #if defined(WR_PIN) && (WR_PIN < 30)
@@ -600,8 +641,7 @@ int main() {
   // EMUZ80_RP2040_PCB
   printf("\n** For EMUZ80_RP2040_PCB! (hanya_develop) **\n");
 #if defined(CONFIG_ROM_CPM)
-  printf("** z80pack - CP/M2.2 CCP+BDOS(E400H-F9FFH), BIOS-01(FA00H-FC2FH), "
-         "BOOT(0000H-) **\n");
+  printf("** z80pack - CP/M2.2 CCP+BDOS(E400H-F9FFH), BIOS01(FA00H-FC2FH) **\n");
   printf("** DISK0 A: z80pack cpm2-1.dsk   **\n");
   printf("** DISK1 B: cpm22_disk1.dsk      **\n");
   printf("** DISK2 C: cpm22_tp301a.dsk     **\n");
@@ -613,7 +653,7 @@ int main() {
   printf("\n-hit [Enter] in terminal-\n");
   while (getchar_timeout_us(100) == PICO_ERROR_TIMEOUT)
     ;
-  printf("\nfor CP/M2.2 v1.0\n");
+  printf("\nfor CP/M2.2 v1.0 (hanya_develop)\n");
 
   float volt = 0;
   if (sysvolt == VREG_VOLTAGE_1_15)
@@ -629,7 +669,7 @@ int main() {
 #endif
 
   //  エミュレーション開始(core1)
-  printf("AE-RP2040 Core:%0.2fV Clock:%uMHz\n", volt, sysclk / 1000);
+  printf("AE-RP2040 Core:%0.2fV Clock:%uMHz (I/O CLK-STOP)\n", volt, sysclk / 1000);
   printf("Emulation task(core1) Start..\n");
 
   multicore_launch_core1(emu_loop);
@@ -641,8 +681,8 @@ int main() {
   // int Z80_freq = 10000000; // 10MHz
   // int Z80_freq = 9000000; // 9MHz
   // int Z80_freq = 8000000; // 8MHz
-  // int Z80_freq = 7000000; // 7MHz
-  int Z80_freq = 6000000; // 6MHz
+  int Z80_freq = 7000000; // 7MHz
+  // int Z80_freq = 6000000; // 6MHz
   // int Z80_freq = 5000000; // 5MHz
   // int Z80_freq = 4000000; // 4MHz
   // int Z80_freq = 2500000; // 2.5MHz
@@ -658,10 +698,7 @@ int main() {
   // int Z80_freq = 100000; // 100kHz
   // int Z80_freq = 10000; // 10kHz
   //  int Z80_freq = 20; // 20Hz
-  gpio_set_function(CLK_PIN, GPIO_FUNC_PWM);
-  uint slice_num = pwm_gpio_to_slice_num(CLK_PIN);
-  set_pwm_freq(CLK_PIN, Z80_freq);
-  pwm_set_enabled(slice_num, true);
+  init_clk_pwm(Z80_freq);
   printf("Z80 CLK-ON %fMHz\n", Z80_freq / 1000000.0);
 
   // 1秒後にRESETを解除
@@ -674,7 +711,7 @@ int main() {
   gpio_put(RESET_PIN, 0);
   printf("RESET-ON\n");
   sleep_ms(100);
-  pwm_set_enabled(slice_num, false);
+  clk_pwm_output_off();
   clk_on_off(10);
   printf("Exited.\n");
 
