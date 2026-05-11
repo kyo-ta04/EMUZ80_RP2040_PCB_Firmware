@@ -468,17 +468,17 @@ int main() {
 
   if (true) { // 高速 コア電圧1.3V クロック 266MHz 設定
     sleep_ms(100);
-    // sysvolt = VREG_VOLTAGE_1_30;
-    sysvolt = VREG_VOLTAGE_1_25;
+    sysvolt = VREG_VOLTAGE_1_30;
+    // sysvolt = VREG_VOLTAGE_1_25;
     vreg_set_voltage(sysvolt);
     sleep_ms(100);
     // sysclk = 400000;
     // sysclk = 360000; 
     // sysclk = 340000; 
     // sysclk = 320000; 
-    // sysclk = 300000; 
+    sysclk = 300000; 
     // sysclk = 280000; 
-    sysclk = 266000; 
+    //sysclk = 266000; 
     // sysclk = 200000;
     if (set_sys_clock_khz(sysclk, true)) {
 #if PICO_RP2040
@@ -598,7 +598,7 @@ int main() {
 
   sleep_ms(2000);
   // EMUZ80_RP2040_PCB
-  printf("\n** For EMUZ80_RP2040_PCB! **\n");
+  printf("\n** For EMUZ80_RP2040_PCB! (hanya_develop) **\n");
 #if defined(CONFIG_ROM_CPM)
   printf("** z80pack - CP/M2.2 CCP+BDOS(E400H-F9FFH), BIOS-01(FA00H-FC2FH), "
          "BOOT(0000H-) **\n");
