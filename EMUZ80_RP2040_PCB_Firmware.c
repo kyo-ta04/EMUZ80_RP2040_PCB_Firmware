@@ -156,15 +156,15 @@ static void init_clk_pwm(uint32_t freq_hz) {
 }
 
 // PIO0
-uint sm_trg_wr = 0;
-uint sm_trg_rd = 1;
-uint sm_emu = 2;
-PIO pio_emu = pio0;
+const uint sm_trg_wr = 0;
+const uint sm_trg_rd = 1;
+const uint sm_emu = 2;
+#define pio_emu pio0
 // PIO1
-uint sm_dirsL = 0;
-uint sm_dirsH = 1;
-uint sm_data_out = 2;
-PIO pio_data_out = pio1;
+const uint sm_dirsL = 0;
+const uint sm_dirsH = 1;
+const uint sm_data_out = 2;
+#define pio_data_out pio1
 
 // --- PIO Helpers ---
 void pio_init_bus() {
@@ -199,7 +199,7 @@ void pio_init_bus() {
   uint offset_emu = pio_add_program(pio, &m_emu_program);
   pio_sm_config c_emu = m_emu_program_get_default_config(offset_emu);
   sm_config_set_in_pins(&c_emu, 0);
-  sm_config_set_in_shift(&c_emu, false, false, 30);  // shift left, auto_push=false, threshold=30
+  sm_config_set_in_shift(&c_emu, false, true, 30);  // shift left, auto_push=true, threshold=30
   pio_sm_init(pio, sm_emu, offset_emu, &c_emu);
   pio_sm_set_enabled(pio, sm_emu, true);
 
@@ -228,7 +228,7 @@ void pio_init_bus() {
   uint offset_data_out = pio_add_program(pio, &data_out_program);
   pio_sm_config c_data_out = data_out_program_get_default_config(offset_data_out);
   sm_config_set_out_pins(&c_data_out, DATA_BASE, 8);
-  sm_config_set_out_shift(&c_data_out, true, false, 8);  // shift right, auto_pull=false, threshold=8
+  sm_config_set_out_shift(&c_data_out, true, true, 8);  // shift right, auto_pull=true, threshold=8
   pio_sm_init(pio, sm_data_out, offset_data_out, &c_data_out);
   pio_sm_set_enabled(pio, sm_data_out, true);
 }
@@ -302,10 +302,15 @@ static inline uint8_t wait_wr_active_and_read_data(const uint32_t gpio)
 #endif
 
 #if defined(ROMDISK_SIZE)
-static __attribute__((noinline)) void handle_fdc_command(
-    uint8_t data_byte, uint8_t dma_addr_high, uint8_t dma_addr_low,
-    uint8_t current_drive, uint8_t current_track, uint8_t current_sector,
-    uint8_t *fdc_status) {
+// I/O用の状態変数（レジスタ枯渇を防ぐためグローバル配置）
+static uint8_t current_drive = 0;
+static uint8_t current_track = 0;
+static uint8_t current_sector = 0;
+static uint8_t fdc_status = 0;
+static uint8_t dma_addr_low = 0;
+static uint8_t dma_addr_high = 0;
+
+static __attribute__((noinline)) void handle_fdc_command(uint8_t data_byte) {
   uint8_t read_write = data_byte;
   uint16_t dma_addr_z80 = ((uint16_t)dma_addr_high << 8) | dma_addr_low;
   // オフセット計算 (128バイト * (トラック * 26 + セクタ-1))
@@ -313,7 +318,9 @@ static __attribute__((noinline)) void handle_fdc_command(
       (current_sector >= 1) ? (current_sector - 1) : 0;
   uint32_t disk_offset =
       ((uint32_t)current_track * 26 + logical_sector) * 128UL;
-
+  // デバッグ用
+  //  printf("FDC R/W: %02X, DMA: %04X, Drv: %d, Trk: %d, Sec: %d\n",
+  //       read_write, dma_addr_z80, current_drive, current_track, current_sector); 
   if (read_write == 0) { // ============== READ ==============
     const uint8_t *src = NULL;
     uint32_t max_size = 0;
@@ -344,17 +351,17 @@ static __attribute__((noinline)) void handle_fdc_command(
           128,                   // 転送数（バイト）
           true);                 // 即開始
       dma_busy = true; // DMA開始
-      *fdc_status = 0;  // 即OK返却（DMAはバックグラウンド）
+      fdc_status = 0;  // 即OK返却（DMAはバックグラウンド）
     } else {
       memset(&memory[dma_addr_z80], 0xE5, 128);
-      *fdc_status = 1;
+      fdc_status = 1;
     }
 
   } else { // ================== WRITE ==================
     uint8_t *dst = NULL;
     uint32_t max_size = 0;
     if (!(current_drive == 9)) { // J : RAM のみ書き込み許可
-      *fdc_status = 1;
+      fdc_status = 1;
     } else {
       dst = ramdisk;
       max_size = RAMDISK_SIZE;
@@ -371,126 +378,132 @@ static __attribute__((noinline)) void handle_fdc_command(
             &memory[dma_addr_z80], // 読み出し元（Z80メモリ）
             128, true);
 
-        *fdc_status = 0;
+        fdc_status = 0;
       } else {
-        *fdc_status = 1;
+        fdc_status = 1;
       }
     }
   }
 }
 #endif
 
+// I/O Write 処理の関数化
+static __attribute__((noinline)) void handle_io_write(uint8_t ioadrs, uint8_t data_byte) {
+  switch (ioadrs) {
+    case 0x01: // CONOUT
+      {
+        uint8_t next = (uart_tx_head + 1) % UART_TX_BUF_SIZE;
+        if (next != uart_tx_tail) {
+          uart_tx_buf[uart_tx_head] = data_byte;
+          uart_tx_head = next;
+        }
+      }
+      break;
+    case 0x0A: // ドライブ選択
+      current_drive = data_byte;
+      break;
+    case 0x0B: // トラック選択
+      current_track = data_byte;
+      break;
+    case 0x0C: // セクタ選択
+      current_sector = data_byte;
+      break;
+    case 0x0D: // FDCOPコマンド
+#if defined(ROMDISK_SIZE)
+      handle_fdc_command(data_byte);
+#endif
+      break;
+    case 0x0F: // DMAアドレス Low
+      dma_addr_low = data_byte;
+      break;
+    case 0x10: // DMAアドレス High
+      dma_addr_high = data_byte;
+      break;
+    case 0x30: // PPI PA
+#if defined(PA0_PIN)
+      if (data_byte & 1) {
+        sio_hw->gpio_set = (1u << PA0_PIN);
+      } else {
+        sio_hw->gpio_clr = (1u << PA0_PIN);
+      }
+#endif
+      break;
+  }
+}
+
+// I/O Read 処理の関数化
+static __attribute__((noinline)) uint8_t handle_io_read(uint8_t ioadrs, uint32_t agpio) {
+  uint8_t data_byte;
+  switch (ioadrs) {
+    case 0x00: // CONSTA
+      data_byte = uart_stat;
+      break;
+    case 0x01: // CONIN
+      data_byte = uart_rxdata;
+      uart_stat = 0;
+      break;
+    case 0x09: // DMA完了ステータス
+      if (dma_busy && dma_channel_is_busy(disk_dma_chan)) {
+        data_byte = 0xFF;
+      } else {
+        data_byte = 0x00;
+        dma_busy = false;
+      }
+      break;
+    case 0x0E: // FDCステータス
+      data_byte = fdc_status;
+      break;
+    default:
+      data_byte = (uint8_t)(agpio >> DATA_BASE);
+      break;
+  }
+  return data_byte;
+}
+
 // --- Main Emulation Loop ---
 __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
   uint8_t data_byte = 0;
 
-  uint8_t current_drive = 0;
-  uint8_t current_track = 0;
-  uint8_t current_sector = 0;
-  uint8_t fdc_status = 0;
-  uint8_t dma_addr_low = 0;
-  uint8_t dma_addr_high = 0;
-
   init_disk_dma(); // DMAC 初期化
-  while (true) {
-    // バスライン取得
-    // GP0-29(A0-15=GP0-15,D0-7=GP16-23,MREQ=GP24,RD=GP25,WR=GP26,WAIT=GP27,RESET=GP28,CLK=GP29)
-    uint32_t agpio = pio_sm_get_blocking(pio_emu, sm_emu);
-#if defined(ADRS_LOW_BASE)
-    uint32_t adrs_word = ((agpio >> ADRS_LOW_BASE) & 0xFF) | ((agpio >> (ADRS_HIGH_BASE - 8)) & 0xFF00);
-#else
-    uint32_t adrs_word = ((agpio >> ADRS_BASE) & 0xFFFF);
-#endif
 
-    if (!(agpio & MREQ_MASK)) { // MREQ=0 メモリアクセス
-#if defined(WR_PIN) && (WR_PIN < 30)
-      if (!(agpio & WR_MASK)) { // MREQ=0, WR=0  Memory-Write
-#else
-      if ((agpio & RD_MASK) && (agpio & RFSH_MASK)) { // MREQ=0, RD=1, RFSH=1 Memory-Write
-#endif
-        data_byte = wait_wr_active_and_read_data(agpio);
-        //        if (adrs_word >= 0x8000) {
-        memory[adrs_word] = data_byte;
-        //        }
-      } else if (!(agpio & RD_MASK)) { // MREQ=0, RD=0 Memory-Read
-        data_byte = memory[adrs_word];
-        pio_sm_put_blocking(pio_data_out, sm_data_out, data_byte);
-      }
-    } else { // MREQ=1  I/Oアクセス
-      clk_pwm_output_off();
-      uint ioadrs = adrs_word & 0xFF;
-      if (agpio & RD_MASK) { // MREQ=1, RD=1  I/O-Write (not Memory-access)
-        data_byte = wait_wr_active_and_read_data(agpio);
-        switch (ioadrs) {
-          case 0x01: // CONOUT : ポート1
-            {
-              uint8_t next = (uart_tx_head + 1) % UART_TX_BUF_SIZE;
-              if (next != uart_tx_tail) {
-                uart_tx_buf[uart_tx_head] = data_byte;
-                uart_tx_head = next;
-              }
-            }
-            break;
-          case 0x0A: // 10:0x0A : ドライブ選択
-            current_drive = data_byte;
-            break;
-          case 0x0B: // 11:0x0B : トラック選択
-            current_track = data_byte;
-            break;
-          case 0x0C: // 12:0x0C : セクタ選択
-            current_sector = data_byte;
-            break;
-          case 0x0D: // 13:0x0D:FDCOPコマンド(0=Read,1=Write)
-#if defined(ROMDISK_SIZE)
-            handle_fdc_command(data_byte, dma_addr_high, dma_addr_low,
-                               current_drive, current_track, current_sector,
-                               &fdc_status);
-#endif
-            break;
-          case 0x0F: // 15:0x0F : DMAアドレス
-            dma_addr_low = data_byte;
-            break;
-          case 0x10: // 16:0x10 : DMAアドレス
-            dma_addr_high = data_byte;
-            break;
-          case 0x30: // 0x30 : PPI PA
-#if defined(PA0_PIN)
-            if (data_byte & 1) {
-              sio_hw->gpio_set = (1u << PA0_PIN); // PA b0 ON
-            } else {
-              sio_hw->gpio_clr = (1u << PA0_PIN); // PA b0 OF
-            }
-#endif
-            break;
+  // PIO レジスタ・マスク・ポインタをキャッシュ（ループ外で1回だけ）
+  uint8_t * const mem_ptr = memory;
+  const volatile uint32_t * const rxf = &pio_emu->rxf[sm_emu];
+  volatile uint32_t * const txf = &pio_data_out->txf[sm_data_out];
+  const uint32_t rxempty_mask = 1u << (PIO_FSTAT_RXEMPTY_LSB + sm_emu);
+
+  // MREQ(24) と WR(26) のビットだけを抽出するマスク
+  const uint32_t bus_mask = (1u << MREQ_PIN) | (1u << WR_PIN);
+  const uint32_t mem_read_state = (1u << WR_PIN); // MREQ=0, WR=1
+  const uint32_t mem_write_state = 0;             // MREQ=0, WR=0
+
+  while (true) {
+    // ① PIO RX FIFO 直叩き（SDK関数バイパス）
+    while (pio_emu->fstat & rxempty_mask) tight_loop_contents();
+    uint32_t agpio = *rxf;
+
+    // 状態を一括抽出 (1 cycle)
+    uint32_t bus_state = agpio & bus_mask;
+
+    // ② 圧倒的高頻度の Memory-Read を最速の直線パスにする
+    if (__builtin_expect(bus_state == mem_read_state, 1)) {
+      *txf = mem_ptr[(uint16_t)agpio]; // Memory-Read
+    } 
+    else if (bus_state == mem_write_state) {
+      mem_ptr[(uint16_t)agpio] = (uint8_t)(agpio >> DATA_BASE); // Memory-Write
+    } 
+      else { 
+        // MREQ=1 (I/Oアクセス)
+        clk_pwm_output_off();
+        uint ioadrs = agpio & 0xFF;
+        if (agpio & RD_MASK) { // MREQ=1, RD=1  I/O-Write
+          uint8_t data_val = wait_wr_active_and_read_data(agpio);
+          handle_io_write(ioadrs, data_val);
+        } else {                   // MREQ=1, WR=1  I/O-Read
+          *txf = handle_io_read(ioadrs, agpio);
         }
-      } else {                   // MREQ=1, WR=1  I/O-Read (not Memory-access)
-        switch (ioadrs) {
-          case 0x00:    // === ポート0 : CONSTA ===
-            data_byte = uart_stat; // 0:not ready, 0xFF:ready
-            break;
-          case 0x01: // === ポート1 : CONIN ===
-            data_byte = uart_rxdata;
-            uart_stat = 0;
-            break;
-          case 0x09: // ← 新規追加：DMA完了ステータスポート
-            if (dma_busy && dma_channel_is_busy(disk_dma_chan)) {
-              data_byte = 0xFF; // まだ転送中（Busy）
-            } else {
-              data_byte = 0x00; // 転送完了（Ready）
-              dma_busy = false;
-            }
-            break;
-          case 0x0E: // 14:0x0E : FDCステータス(0:OK/1:NG)
-            data_byte = fdc_status;
-            break;
-          default:
-            data_byte = (uint8_t)(agpio >> DATA_BASE);
-            break;
-        }
-        pio_sm_put_blocking(pio_data_out, sm_data_out, data_byte);
+        clk_pwm_output_on();
       }
-      clk_pwm_output_on();
-    }
 #if 0
     if (false) { // デバッグ用 Z80_freq = 20  (20Hz) で使用する
 #if defined(WR_PIN) && (WR_PIN < 30)
@@ -524,8 +537,8 @@ int main() {
     // sysclk = 360000; 
     // sysclk = 340000; 
     // sysclk = 320000; 
-    sysclk = 300000; 
-    // sysclk = 280000; 
+    // sysclk = 300000; 
+    sysclk = 288000; 
     //sysclk = 266000; 
     // sysclk = 200000;
     if (set_sys_clock_khz(sysclk, true)) {
@@ -686,9 +699,9 @@ int main() {
   // int Z80_freq = 12000000; // 12MHz
   // int Z80_freq = 11000000; // 11MHz
   // int Z80_freq = 10000000; // 10MHz
-  // int Z80_freq = 9000000; // 9MHz
+   int Z80_freq = 9000000; // 9MHz
   // int Z80_freq = 8000000; // 8MHz
-  int Z80_freq = 7000000; // 7MHz
+  // int Z80_freq = 7000000; // 7MHz
   // int Z80_freq = 6000000; // 6MHz
   // int Z80_freq = 5000000; // 5MHz
   // int Z80_freq = 4000000; // 4MHz

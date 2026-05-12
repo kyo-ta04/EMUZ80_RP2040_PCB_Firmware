@@ -3,7 +3,6 @@
 .program trg_rw
 ; RD/WRの立ち下がりを検出し、IRQ(0)を発生させる
 .wrap_target
-    wait 1 pin 0
     wait 0 pin 0
     irq 0
     wait 1 pin 0
@@ -11,19 +10,16 @@
 
 .program m_emu
 ; バス監視とデータ送受信
+    mov isr, null     ; ISRクリア
 .wrap_target
     wait 1 irq 0
-    mov isr, null         ; ISRクリア
-    in pins, 30
-    push block
-    irq clear 0
+    in pins, 30       ; 30ビット取り込み(auto push)
 .wrap
 
 .program data_out
 ; データ送信
 .wrap_target
-    pull block
-    out pins, 8
+    out pins, 8     ; auto pull
 .wrap
 
 .program d_pindirs
