@@ -272,40 +272,121 @@ void init_disk_dma(void) {
   }
 }
 
-static void wait_wr_active_and_read_data(const uint32_t gpio, uint8_t *data_out)
+static inline uint8_t wait_wr_active_and_read_data(const uint32_t gpio)
 {
 #if defined(WR_PIN) && (WR_PIN < 30)
     if (!(gpio & (1u << WR_PIN))) {
-        if (data_out) {
-            *data_out = (uint8_t)((gpio >> DATA_BASE) & 0xffu);
-        }
-        return;
+        return (uint8_t)((gpio >> DATA_BASE) & 0xffu);
     }
 #endif
     const uint32_t timeout_loops = 100000u;
     for (uint32_t i = 0; i < timeout_loops; i++) {
         if (!gpio_get(WR_PIN)) {
             uint32_t v = gpio_get_all();
-            if (data_out) {
-                *data_out = (uint8_t)((v >> DATA_BASE) & 0xffu);
-            }
-            return;
+            return (uint8_t)((v >> DATA_BASE) & 0xffu);
         }
 
         tight_loop_contents();
     }
     printf("%s: timeout\n", __func__);
+    return 0xFF;
 }
+
+#define MREQ_MASK (1u << MREQ_PIN)
+#define RD_MASK   (1u << RD_PIN)
+#if defined(WR_PIN) && (WR_PIN < 30)
+#define WR_MASK   (1u << WR_PIN)
+#endif
+#if defined(RFSH_PIN)
+#define RFSH_MASK (1u << RFSH_PIN)
+#endif
+
+#if defined(ROMDISK_SIZE)
+static __attribute__((noinline)) void handle_fdc_command(
+    uint8_t data_byte, uint8_t dma_addr_high, uint8_t dma_addr_low,
+    uint8_t current_drive, uint8_t current_track, uint8_t current_sector,
+    uint8_t *fdc_status) {
+  uint8_t read_write = data_byte;
+  uint16_t dma_addr_z80 = ((uint16_t)dma_addr_high << 8) | dma_addr_low;
+  // オフセット計算 (128バイト * (トラック * 26 + セクタ-1))
+  uint32_t logical_sector =
+      (current_sector >= 1) ? (current_sector - 1) : 0;
+  uint32_t disk_offset =
+      ((uint32_t)current_track * 26 + logical_sector) * 128UL;
+
+  if (read_write == 0) { // ============== READ ==============
+    const uint8_t *src = NULL;
+    uint32_t max_size = 0;
+
+    if (current_drive <= 3) { // A, B, C, D (ROM 256KB)
+      src = rom_disks[current_drive];
+      max_size = ROMDISK_SIZE;       // 256 * 1024
+    } else if (current_drive == 8) { // I: (ROM 650KB)
+      src = cpm22_htc;
+      max_size = cpm22_htc_len;
+    } else if (current_drive == 9) { // J: (RAM 128KB)
+      src = ramdisk;
+      max_size = RAMDISK_SIZE;
+    }
+    if (src && (disk_offset + 128 <= max_size)) {
+      if (dma_channel_is_busy(disk_dma_chan)) {
+        dma_channel_abort(disk_dma_chan);
+      }
+      dma_channel_config c =
+          dma_channel_get_default_config(disk_dma_chan);
+      channel_config_set_transfer_data_size(&c, DMA_SIZE_8); // 8bit
+      channel_config_set_read_increment(&c, true);
+      channel_config_set_write_increment(&c, true);
+      dma_channel_configure(
+          disk_dma_chan, &c,
+          &memory[dma_addr_z80], // 書き込み先（Z80メモリ）
+          src + disk_offset,     // 読み出し元
+          128,                   // 転送数（バイト）
+          true);                 // 即開始
+      dma_busy = true; // DMA開始
+      *fdc_status = 0;  // 即OK返却（DMAはバックグラウンド）
+    } else {
+      memset(&memory[dma_addr_z80], 0xE5, 128);
+      *fdc_status = 1;
+    }
+
+  } else { // ================== WRITE ==================
+    uint8_t *dst = NULL;
+    uint32_t max_size = 0;
+    if (!(current_drive == 9)) { // J : RAM のみ書き込み許可
+      *fdc_status = 1;
+    } else {
+      dst = ramdisk;
+      max_size = RAMDISK_SIZE;
+      if (dst && disk_offset + 128 <= max_size && disk_dma_chan >= 0) {
+        dma_channel_config c =
+            dma_channel_get_default_config(disk_dma_chan);
+        channel_config_set_transfer_data_size(&c, DMA_SIZE_8);
+        channel_config_set_read_increment(&c, true);
+        channel_config_set_write_increment(&c, true);
+
+        dma_channel_configure(
+            disk_dma_chan, &c,
+            dst + disk_offset,     // 書き込み先（RAMディスク）
+            &memory[dma_addr_z80], // 読み出し元（Z80メモリ）
+            128, true);
+
+        *fdc_status = 0;
+      } else {
+        *fdc_status = 1;
+      }
+    }
+  }
+}
+#endif
 
 // --- Main Emulation Loop ---
 __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
-  uint count = 0;
   uint8_t data_byte = 0;
 
   uint8_t current_drive = 0;
   uint8_t current_track = 0;
   uint8_t current_sector = 0;
-  uint8_t read_write = 0;
   uint8_t fdc_status = 0;
   uint8_t dma_addr_low = 0;
   uint8_t dma_addr_high = 0;
@@ -314,13 +395,6 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
   while (true) {
     // バスライン取得
     // GP0-29(A0-15=GP0-15,D0-7=GP16-23,MREQ=GP24,RD=GP25,WR=GP26,WAIT=GP27,RESET=GP28,CLK=GP29)
-    const uint32_t mreq_mask = (1u << MREQ_PIN);
-#if defined(WR_PIN) && (WR_PIN < 30)
-    const uint32_t wr_mask = (1u << WR_PIN);
-#else
-    const uint32_t rfsh_mask = (1u << RFSH_PIN);
-#endif
-    const uint32_t rd_mask = (1u << RD_PIN);
     uint32_t agpio = pio_sm_get_blocking(pio_emu, sm_emu);
 #if defined(ADRS_LOW_BASE)
     uint32_t adrs_word = ((agpio >> ADRS_LOW_BASE) & 0xFF) | ((agpio >> (ADRS_HIGH_BASE - 8)) & 0xFF00);
@@ -328,176 +402,109 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
     uint32_t adrs_word = ((agpio >> ADRS_BASE) & 0xFFFF);
 #endif
 
-    count++;
-    if (!(agpio & mreq_mask)) { // MREQ=0 メモリアクセス
+    if (!(agpio & MREQ_MASK)) { // MREQ=0 メモリアクセス
 #if defined(WR_PIN) && (WR_PIN < 30)
-      if (!(agpio & wr_mask)) { // MREQ=0, WR=0  Memory-Write
+      if (!(agpio & WR_MASK)) { // MREQ=0, WR=0  Memory-Write
 #else
-      if ((agpio & rd_mask) && (agpio & rfsh_mask)) { // MREQ=0, RD=1, RFSH=1 Memory-Write
+      if ((agpio & RD_MASK) && (agpio & RFSH_MASK)) { // MREQ=0, RD=1, RFSH=1 Memory-Write
 #endif
-        wait_wr_active_and_read_data(agpio, &data_byte);
+        data_byte = wait_wr_active_and_read_data(agpio);
         //        if (adrs_word >= 0x8000) {
         memory[adrs_word] = data_byte;
         //        }
-      } else if (!(agpio & rd_mask)) { // MREQ=0, RD=0 Memory-Read
+      } else if (!(agpio & RD_MASK)) { // MREQ=0, RD=0 Memory-Read
         data_byte = memory[adrs_word];
         pio_sm_put_blocking(pio_data_out, sm_data_out, data_byte);
       }
     } else { // MREQ=1  I/Oアクセス
       clk_pwm_output_off();
       uint ioadrs = adrs_word & 0xFF;
-      if (agpio & rd_mask) { // MREQ=1, RD=1  I/O-Write (not Memory-access)
-        wait_wr_active_and_read_data(agpio, &data_byte);
-        if (ioadrs == 0x01) { // CONOUT : ポート1
-          uint8_t next = (uart_tx_head + 1) % UART_TX_BUF_SIZE;
-          if (next != uart_tx_tail) {
-            uart_tx_buf[uart_tx_head] = data_byte;
-            uart_tx_head = next;
-          }
-          // 満杯時は文字を捨てる
-        } else if (ioadrs == 0x0A) { // 10:0x0A : ドライブ選択
-          current_drive = data_byte;
-        } else if (ioadrs == 0x0B) { // 11:0x0B : トラック選択
-          current_track = data_byte;
-        } else if (ioadrs == 0x0C) { // 12:0x0C : セクタ選択
-          current_sector = data_byte;
-        } else if (ioadrs == 0x0D) { // 13:0x0D:FDCOPコマンド(0=Read,1=Write)
+      if (agpio & RD_MASK) { // MREQ=1, RD=1  I/O-Write (not Memory-access)
+        data_byte = wait_wr_active_and_read_data(agpio);
+        switch (ioadrs) {
+          case 0x01: // CONOUT : ポート1
+            {
+              uint8_t next = (uart_tx_head + 1) % UART_TX_BUF_SIZE;
+              if (next != uart_tx_tail) {
+                uart_tx_buf[uart_tx_head] = data_byte;
+                uart_tx_head = next;
+              }
+            }
+            break;
+          case 0x0A: // 10:0x0A : ドライブ選択
+            current_drive = data_byte;
+            break;
+          case 0x0B: // 11:0x0B : トラック選択
+            current_track = data_byte;
+            break;
+          case 0x0C: // 12:0x0C : セクタ選択
+            current_sector = data_byte;
+            break;
+          case 0x0D: // 13:0x0D:FDCOPコマンド(0=Read,1=Write)
 #if defined(ROMDISK_SIZE)
-          // ------------------------------------------------------------------
-          // READ / WRITE 処理 (ioadrs == 0x0D 内)
-          // ------------------------------------------------------------------
-          read_write = data_byte;
-          uint16_t dma_addr_z80 = ((uint16_t)dma_addr_high << 8) | dma_addr_low;
-          // オフセット計算 (128バイト * (トラック * 26 + セクタ-1))
-          uint32_t logical_sector =
-              (current_sector >= 1) ? (current_sector - 1) : 0;
-          uint32_t disk_offset =
-              ((uint32_t)current_track * 26 + logical_sector) * 128UL;
-
-          if (read_write == 0) { // ============== READ ==============
-            const uint8_t *src = NULL;
-            uint8_t *dst = NULL;
-            uint32_t max_size = 0;
-            // printf("Read : drive=%u sec=%u track=%u\n", current_drive,
-            //       current_sector, current_track);
-
-            if (current_drive <= 3) { // A, B, C, D (ROM 256KB)
-              src = rom_disks[current_drive];
-              max_size = ROMDISK_SIZE;       // 256 * 1024
-            } else if (current_drive == 8) { // I: (ROM 650KB)
-              src = cpm22_htc;
-              max_size = cpm22_htc_len;
-            } else if (current_drive == 9) { // J: (RAM 128KB)
-              src = ramdisk;
-              max_size = RAMDISK_SIZE;
-            }
-            if (src && (disk_offset + 128 <= max_size)) {
-              // 前のDMAがまだ動いていたら強制終了（安全策）
-              if (dma_channel_is_busy(disk_dma_chan)) {
-                dma_channel_abort(disk_dma_chan);
-              }
-              // uint32_t start = time_us_32(); // 時間測定
-              // DMAで128バイトコピー開始（即時）
-              dma_channel_config c =
-                  dma_channel_get_default_config(disk_dma_chan);
-              channel_config_set_transfer_data_size(&c, DMA_SIZE_8); // 8bit
-              channel_config_set_read_increment(&c, true);
-              channel_config_set_write_increment(&c, true);
-              // channel_config_set_dreq(&c, 0); // 常に即時（デフォルト）
-              dma_channel_configure(
-                  disk_dma_chan, &c,
-                  &memory[dma_addr_z80], // 書き込み先（Z80メモリ）
-                  src + disk_offset,     // 読み出し元
-                  128,                   // 転送数（バイト）
-                  true);                 // 即開始
-              // 転送終了待ちする場合
-              // dma_channel_wait_for_finish_blocking(disk_dma_chan);
-              // uint32_t end = time_us_32();    // 時間測定
-              // printf("Read 128B: %u us\n", end - start);
-              dma_busy = true; // DMA開始
-              fdc_status = 0;  // 即OK返却（DMAはバックグラウンド）
-            } else {
-              memset(&memory[dma_addr_z80], 0xE5, 128);
-              fdc_status = 1;
-            }
-
-          } else { // ================== WRITE ==================
-            uint8_t *dst = NULL;
-            uint32_t max_size = 0;
-            if (!(current_drive == 9)) { // J : RAM のみ書き込み許可
-              fdc_status = 1;
-            } else {
-              dst = ramdisk;
-              max_size = RAMDISK_SIZE;
-              if (dst && disk_offset + 128 <= max_size && disk_dma_chan >= 0) {
-                dma_channel_config c =
-                    dma_channel_get_default_config(disk_dma_chan);
-                channel_config_set_transfer_data_size(&c, DMA_SIZE_8);
-                channel_config_set_read_increment(&c, true);
-                channel_config_set_write_increment(&c, true);
-
-                dma_channel_configure(
-                    disk_dma_chan, &c,
-                    dst + disk_offset,     // 書き込み先（RAMディスク）
-                    &memory[dma_addr_z80], // 読み出し元（Z80メモリ）
-                    128, true);
-
-                fdc_status = 0;
-              } else {
-                fdc_status = 1;
-              }
-            }
-          }
-#endif  // ROMDISK_SIZE
-        } else if (ioadrs == 0x0F) { // 15:0x0F : DMAアドレス
-          dma_addr_low = data_byte;
-        } else if (ioadrs == 0x10) { // 16:0x10 : DMAアドレス
-          dma_addr_high = data_byte;
-        } else if (ioadrs == 0x30) { // 0x30 : PPI PA
-#if defined(PA0_PIN)
-          // ==== ここから先はSIO直叩き（最速） ====
-          if (data_byte & 1) {
-            sio_hw->gpio_set = (1u << PA0_PIN); // PA b0 ON
-          } else {
-            sio_hw->gpio_clr = (1u << PA0_PIN); // PA b0 OF
-          }
+            handle_fdc_command(data_byte, dma_addr_high, dma_addr_low,
+                               current_drive, current_track, current_sector,
+                               &fdc_status);
 #endif
+            break;
+          case 0x0F: // 15:0x0F : DMAアドレス
+            dma_addr_low = data_byte;
+            break;
+          case 0x10: // 16:0x10 : DMAアドレス
+            dma_addr_high = data_byte;
+            break;
+          case 0x30: // 0x30 : PPI PA
+#if defined(PA0_PIN)
+            if (data_byte & 1) {
+              sio_hw->gpio_set = (1u << PA0_PIN); // PA b0 ON
+            } else {
+              sio_hw->gpio_clr = (1u << PA0_PIN); // PA b0 OF
+            }
+#endif
+            break;
         }
       } else {                   // MREQ=1, WR=1  I/O-Read (not Memory-access)
-        if (ioadrs == 0x00) {    // === ポート0 : CONSTA ===
-          data_byte = uart_stat; // 0:not ready, 0xFF:ready
-        } else if (ioadrs == 0x01) { // === ポート1 : CONIN ===
-          data_byte = uart_rxdata;
-          uart_stat = 0;
-        } else if (ioadrs == 0x09) { // ← 新規追加：DMA完了ステータスポート
-          if (dma_busy && dma_channel_is_busy(disk_dma_chan)) {
-            data_byte = 0xFF; // まだ転送中（Busy）
-          } else {
-            data_byte = 0x00; // 転送完了（Ready）
-            dma_busy = false;
-          }
-        } else if (ioadrs == 0x0E) { // 14:0x0E : FDCステータス(0:OK/1:NG)
-                                     //          data_byte = 0;
-          data_byte = fdc_status;
-        } else {
-          data_byte = (uint8_t)(agpio >> DATA_BASE);
+        switch (ioadrs) {
+          case 0x00:    // === ポート0 : CONSTA ===
+            data_byte = uart_stat; // 0:not ready, 0xFF:ready
+            break;
+          case 0x01: // === ポート1 : CONIN ===
+            data_byte = uart_rxdata;
+            uart_stat = 0;
+            break;
+          case 0x09: // ← 新規追加：DMA完了ステータスポート
+            if (dma_busy && dma_channel_is_busy(disk_dma_chan)) {
+              data_byte = 0xFF; // まだ転送中（Busy）
+            } else {
+              data_byte = 0x00; // 転送完了（Ready）
+              dma_busy = false;
+            }
+            break;
+          case 0x0E: // 14:0x0E : FDCステータス(0:OK/1:NG)
+            data_byte = fdc_status;
+            break;
+          default:
+            data_byte = (uint8_t)(agpio >> DATA_BASE);
+            break;
         }
         pio_sm_put_blocking(pio_data_out, sm_data_out, data_byte);
       }
       clk_pwm_output_on();
     }
+#if 0
     if (false) { // デバッグ用 Z80_freq = 20  (20Hz) で使用する
 #if defined(WR_PIN) && (WR_PIN < 30)
-      printf("%05u MREQ:%d WR:%d RD:%d ADRS:%04X DATA:%02X\n", count,
+      printf("MREQ:%d WR:%d RD:%d ADRS:%04X DATA:%02X\n",
              (agpio >> MREQ_PIN) & 1, (agpio >> WR_PIN) & 1,
              (agpio >> RD_PIN) & 1, adrs_word, (int)data_byte);
 #else
-      printf("%05u MREQ:%d RFSH:%d RD:%d ADRS:%04X DATA:%02X\n", count,
+      printf("MREQ:%d RFSH:%d RD:%d ADRS:%04X DATA:%02X\n",
              (agpio >> MREQ_PIN) & 1, (agpio >> RFSH_PIN) & 1,
              (agpio >> RD_PIN) & 1, adrs_word, (int)data_byte);
 #endif
     }
-  }
+#endif
+    }
 }
 
 //
