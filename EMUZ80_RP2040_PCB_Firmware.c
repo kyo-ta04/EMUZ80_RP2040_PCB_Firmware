@@ -527,7 +527,7 @@ int main() {
   uint32_t sysclk = clock_get_hz(clk_sys);
   int sysvolt = VREG_VOLTAGE_1_15;
 
-  if (true) { // 高速 コア電圧1.3V クロック 266MHz 設定
+  if (false) { // 高速 コア電圧1.3V クロック 288MHz 設定
     sleep_ms(100);
     sysvolt = VREG_VOLTAGE_1_30;
     // sysvolt = VREG_VOLTAGE_1_25;
@@ -699,10 +699,10 @@ int main() {
   // int Z80_freq = 12000000; // 12MHz
   // int Z80_freq = 11000000; // 11MHz
   // int Z80_freq = 10000000; // 10MHz
-   int Z80_freq = 9000000; // 9MHz
+  // int Z80_freq = 9000000; // 9MHz
   // int Z80_freq = 8000000; // 8MHz
-  // int Z80_freq = 7000000; // 7MHz
-  // int Z80_freq = 6000000; // 6MHz
+  //int Z80_freq = 7000000; // 7MHz
+  int Z80_freq = 6000000; // 6MHz
   // int Z80_freq = 5000000; // 5MHz
   // int Z80_freq = 4000000; // 4MHz
   // int Z80_freq = 2500000; // 2.5MHz
