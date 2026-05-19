@@ -495,8 +495,8 @@ int main() {
     // sysclk = 336000; 
     // sysclk = 312000;
     // sysclk = 300000; // 300MHz 1.3V Z80 10MHz
-    // sysclk = 288000;
-    sysclk = 276000;  // 276MHz 1.25V Z80 9MHz 
+    sysclk = 288000;
+    // sysclk = 276000;  // 276MHz 1.25V Z80 9MHz 
     // sysclk = 264000; 
     // sysclk = 200000;
     if (set_sys_clock_khz(sysclk, true)) {
@@ -587,14 +587,14 @@ int main() {
   multicore_launch_core1(emu_loop);
   sleep_ms(1000);
 
-  // CLK PWM Setup ,  MAX RP2040 300MHz Z80 6MHz
+  // CLK PWM Setup ,  MAX RP2040 1.3v 288MHz Z80 9MHz
   // int Z80_freq = 12000000; // 12MHz
   // int Z80_freq = 11000000; // 11MHz
   // int Z80_freq = 10000000; // 10MHz
-  int Z80_freq = 9000000; // 9MHz
+  // int Z80_freq = 9000000; // 9MHz
   // int Z80_freq = 8000000; // 8MHz
   // int Z80_freq = 7000000; // 7MHz
-  // int Z80_freq = 6000000; // 6MHz
+  int Z80_freq = 6000000; // 6MHz
   // int Z80_freq = 5000000; // 5MHz
   // int Z80_freq = 4000000; // 4MHz
   // int Z80_freq = 2500000; // 2.5MHz
