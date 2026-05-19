@@ -5,10 +5,7 @@
 //
 // SPDX-License-Identifier: MIT
 // See LICENSE file for details.
-//
-// ** For EMUZ80_RP2040_PCB! **
 
-#include "AE-RP2040.pio.h"
 #include "hardware/clocks.h"
 #include "hardware/pio.h"
 #include "hardware/pwm.h"
@@ -63,7 +60,6 @@ volatile uint8_t __attribute__((section(".scratch_y.uart"))) uart_stat = 0;
 
 #define UART_RX_READY 0xFF
 
-
 // BOOT ROM
 const unsigned char boot[] = {
     0xC3,
@@ -95,6 +91,7 @@ const uint8_t *const rom_disks[] = {cpm22_1, cpm22_disk1, tp301a, z80forth};
 static uint8_t __attribute__((aligned(4))) ramdisk[RAMDISK_SIZE] = {
     [0 ... RAMDISK_SIZE - 1] = 0xE5 // E5で埋めて未使用にする
 };
+
 
 //
 // --- Helper: Manual Clock Pulse ---
@@ -180,71 +177,76 @@ static void init_clk_pwm(uint32_t freq_hz) {
   clk_pwm_output_on();
 }
 
-uint sm_trg = 0;
-uint sm_emu = 1;
-uint sm_dirsL = 2;
-uint sm_dirsH = 3;
+// PIO0
+const uint sm_trg_wr = 0;
+const uint sm_trg_rd = 1;
+const uint sm_emu = 2;
+#define pio_emu pio0
+// PIO1
+const uint sm_dirsL = 0;
+const uint sm_dirsH = 1;
+const uint sm_data_out = 2;
+#define pio_data_out pio1
 
 // --- PIO Helpers ---
 void pio_init_bus() {
-  PIO pio = pio0;
+  PIO pio;
 
-  // SM0: trg_rw2 (Detection of falling edge on RD/WR)
-  uint offset_trg = pio_add_program(pio, &trg_rw2_program);
-  pio_sm_config c_trg = trg_rw2_program_get_default_config(offset_trg);
+  // PIO 0
+  pio = pio0;
 
-  // SM1: m_emu (Address/Data handling)
+  // SM: trg_wr (Detection of falling edge on WR)
+  uint offset_trg_wr = pio_add_program(pio, &trg_rw_program);
+  pio_sm_config c_trg_wr = trg_rw_program_get_default_config(offset_trg_wr);
+  sm_config_set_in_pins(&c_trg_wr, WR_PIN);
+
+  pio_sm_init(pio, sm_trg_wr, offset_trg_wr, &c_trg_wr);
+  pio_sm_set_enabled(pio, sm_trg_wr, true);
+
+  // SM: trg_rd (Detection of falling edge on RD)
+  uint offset_trg_rd = pio_add_program(pio, &trg_rw_program);
+  pio_sm_config c_trg_rd = trg_rw_program_get_default_config(offset_trg_rd);
+  sm_config_set_in_pins(&c_trg_rd, RD_PIN);
+
+  pio_sm_init(pio, sm_trg_rd, offset_trg_rd, &c_trg_rd);
+  pio_sm_set_enabled(pio, sm_trg_rd, true);
+
+  // SM: m_emu (Address/Data handling)
   uint offset_emu = pio_add_program(pio, &m_emu_program);
   pio_sm_config c_emu = m_emu_program_get_default_config(offset_emu);
-
-  // SM2/3: d_pindirs (Direction toggle)
-  uint offset_dirs = pio_add_program(pio, &d_pindirs_program);
-  pio_sm_config c_dirs = d_pindirs_program_get_default_config(offset_dirs);
-  pio_sm_config c_dirsH = d_pindirs_program_get_default_config(offset_dirs);
-
-  // GPIOをPIO用に初期化 GP0-15(A0-15), GP16-23(D0-7), GP24(MREQ/IORQ),
-  // GP25(RD), GP26(WR), GP27(WAIT), GP28(RESET), GP29(CLK)
-  for (int i = 0; i <= 23; i++) {
-    pio_gpio_init(pio, i);
-  }
-  //  pio_gpio_init(pio, IORQ_PIN); // GP24(IORQ)
-  pio_gpio_init(pio, MREQ_PIN); // GP24(MREQ)
-  pio_gpio_init(pio, RD_PIN);   // GP25(RD)
-  pio_gpio_init(pio, WR_PIN);   // GP26(WR)
-  //  pio_gpio_init(pio, WAIT_PIN); // GP27(WAIT)
-
-  // SM0: trg_rw2 (Detection of falling edge on RD/WR)
-  sm_config_set_in_pins(&c_trg, RD_PIN); // base = GP25 (RD, WR)
-  pio_sm_init(pio, sm_trg, offset_trg, &c_trg);
-  pio_sm_set_enabled(pio, sm_trg, true);
-
-  // SM1: m_emu (Address/Data handling)
-  sm_config_set_in_pins(&c_emu, 0);             // base = GP0
-  sm_config_set_out_pins(&c_emu, DATA_BASE, 8); // base = GP16, cnt = 8
-  sm_config_set_jmp_pin(&c_emu, RD_PIN);
-
-  // D0-7ピン初期化(入力)
-  pio_sm_set_consecutive_pindirs(pio, sm_emu, DATA_BASE, 8, false);
-  // シフトレジスタの設定 (Auto Push/Pull 有効化)
-  // ISRのシフト方向, auto_push=true, threshold=30
-  sm_config_set_in_shift(&c_emu, false, true, 30);
-  // OSRのシフト方向, auto_pull=true, threshold=8
-  sm_config_set_out_shift(&c_emu, true, true, 8);
-
+  sm_config_set_in_pins(&c_emu, 0);
+  sm_config_set_in_shift(&c_emu, false, true, 30);  // shift left, auto_push=true, threshold=30
   pio_sm_init(pio, sm_emu, offset_emu, &c_emu);
   pio_sm_set_enabled(pio, sm_emu, true);
 
-  // SM2/3: d_pindirs (Direction toggle)
-  sm_config_set_set_pins(&c_dirs, DATA_BASE, 4); // GP0..3
-  sm_config_set_jmp_pin(&c_dirs, RD_PIN);
-  pio_sm_init(pio, sm_dirsL, offset_dirs, &c_dirs);
+  // PIO 1
+  pio = pio1;
+  for (int i = 0; i < 8; i++) {
+    pio_gpio_init(pio, DATA_BASE + i);
+  }
 
-  sm_config_set_set_pins(&c_dirsH, DATA_BASE + 4, 4); // GP4..7
-  sm_config_set_jmp_pin(&c_dirsH, RD_PIN);
-  pio_sm_init(pio, sm_dirsH, offset_dirs, &c_dirsH);
-
+  // SM: dirsL
+  uint offset_dirs = pio_add_program(pio, &d_pindirs_program);
+  pio_sm_config c_dirsL = d_pindirs_program_get_default_config(offset_dirs);
+  sm_config_set_set_pins(&c_dirsL, DATA_BASE, 4); // D0..D3
+  sm_config_set_in_pins(&c_dirsL, RD_PIN);
+  pio_sm_init(pio, sm_dirsL, offset_dirs, &c_dirsL);
   pio_sm_set_enabled(pio, sm_dirsL, true);
+
+  // SM: dirsH
+  pio_sm_config c_dirsH = d_pindirs_program_get_default_config(offset_dirs);
+  sm_config_set_set_pins(&c_dirsH, DATA_BASE + 4, 4); // D4..D7
+  sm_config_set_in_pins(&c_dirsH, RD_PIN);
+  pio_sm_init(pio, sm_dirsH, offset_dirs, &c_dirsH);
   pio_sm_set_enabled(pio, sm_dirsH, true);
+
+  // SM: data_out (Output to data bus)
+  uint offset_data_out = pio_add_program(pio, &data_out_program);
+  pio_sm_config c_data_out = data_out_program_get_default_config(offset_data_out);
+  sm_config_set_out_pins(&c_data_out, DATA_BASE, 8);
+  sm_config_set_out_shift(&c_data_out, true, true, 8);  // shift right, auto_pull=true, threshold=8
+  pio_sm_init(pio, sm_data_out, offset_data_out, &c_data_out);
+  pio_sm_set_enabled(pio, sm_data_out, true);
 }
 
 // --- UART Task (Core 0) ---
@@ -474,7 +476,7 @@ void __time_critical_func(emu_loop)(void) {
       }
       clk_pwm_output_on(); // Z80クロック再開
     }
-  }
+    }
 }
 
 //
@@ -486,8 +488,8 @@ int main() {
 
   if (true) { // 高速 コア電圧 クロック 設定
     sleep_ms(100);
-    // sysvolt = VREG_VOLTAGE_1_30;
-    sysvolt = VREG_VOLTAGE_1_25;
+    sysvolt = VREG_VOLTAGE_1_30;
+    // sysvolt = VREG_VOLTAGE_1_25;
     vreg_set_voltage(sysvolt);
     sleep_ms(100);
     // sysclk = 400000;
@@ -529,26 +531,40 @@ int main() {
   memcpy(memory + 0xFA00, bios01, bios01_size);
   memcpy(memory, boot, sizeof(boot));
 
-  // GPIO初期化 GP0-29
-  // A0-A15:GP0-15,D0-D7:GP16-23,IORQ:GP24,MREQ:GP24,RD:GP25,WR:GP26,WAIT:GP27,RESET:GP28,CLK:GP29
-  gpio_init_mask(0x0FFFFFFF);
-  for (int i = 0; i <= 23; i++) {
-    gpio_set_dir(i, GPIO_IN);
+  // GPIO初期化
+  // 入力: A0-A15,D0-D7,IORQ,MREQ,RD,WR,RFSH
+  for (int i = 0; i < 16; i++) {
+    gpio_init(ADRS_BASE + i);
+    gpio_set_dir(ADRS_BASE + i, GPIO_IN);
     //   gpio_pull_up(i);
   }
+  for (int i = 0; i < 8; i++) {
+    gpio_init(DATA_BASE + i);
+    gpio_set_dir(DATA_BASE + i, GPIO_IN);
+    //   gpio_pull_up(i);
+  }
+  gpio_init(IORQ_PIN);
+  gpio_set_dir(IORQ_PIN, GPIO_IN);
+  gpio_init(MREQ_PIN);
+  gpio_set_dir(MREQ_PIN, GPIO_IN);
+  gpio_init(RD_PIN);
+  gpio_set_dir(RD_PIN, GPIO_IN);
+  gpio_init(WR_PIN);
+  gpio_set_dir(WR_PIN, GPIO_IN);
 
-  // 他の制御ピン RESET:GP28 CLK:GP29
+  // 出力: RESET
   gpio_init(RESET_PIN);
   gpio_set_dir(RESET_PIN, GPIO_OUT);
   gpio_put(RESET_PIN, 0); // RESET ON
 
+
   // ====================== GPIO初期設定はC SDKで（超簡単・安全）
   // ======================
-  gpio_init(PA0_PIN); // ピン初期化（FUNCSEL = SIOに自動設定）GPIO27
+  gpio_init(PA0_PIN); // ピン初期化（FUNCSEL = SIOに自動設定）
   gpio_set_dir(PA0_PIN, GPIO_OUT); // 出力方向に設定（SIOのOEも自動でON）
   gpio_put(PA0_PIN, 0);            // 初期値はOFF（任意）
 
-  // printf("GPIO27 初期設定完了（SDK使用）→ 以後SIO直叩きでON/OFF\n");
+  // printf("GPIO 初期設定完了（SDK使用）→ 以後SIO直叩きでON/OFF\n");
   sleep_ms(100);
 
   // Initial CLK pulses (Python: CLK_OnOff(10))
@@ -570,7 +586,7 @@ int main() {
   printf("\n-hit [Enter] in terminal-\n");
   while (getchar_timeout_us(100) == PICO_ERROR_TIMEOUT)
     ;
-  printf("\nfor CP/M2.2 v1.0\n");
+  printf("\nfor CP/M2.2 v1.1\n");
 
   float volt = 0;
   if (sysvolt == VREG_VOLTAGE_1_15)
@@ -593,7 +609,7 @@ int main() {
   // int Z80_freq = 10000000; // 10MHz
   // int Z80_freq = 9000000; // 9MHz
   // int Z80_freq = 8000000; // 8MHz
-  // int Z80_freq = 7000000; // 7MHz
+  //int Z80_freq = 7000000; // 7MHz
   int Z80_freq = 6000000; // 6MHz
   // int Z80_freq = 5000000; // 5MHz
   // int Z80_freq = 4000000; // 4MHz
@@ -610,6 +626,7 @@ int main() {
   // int Z80_freq = 100000; // 100kHz
   // int Z80_freq = 10000; // 10kHz
   //  int Z80_freq = 20; // 20Hz
+  init_clk_pwm(Z80_freq);
   init_clk_pwm(Z80_freq);
   printf("Z80 CLK-ON %fMHz\n", Z80_freq / 1000000.0);
 

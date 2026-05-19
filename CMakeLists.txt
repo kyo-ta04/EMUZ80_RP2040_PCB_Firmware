@@ -62,6 +62,7 @@ target_link_libraries(EMUZ80_RP2040_PCB_Firmware
 
 # Add the standard include files to the build
 target_include_directories(EMUZ80_RP2040_PCB_Firmware PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/boards/${PICO_BOARD}
         ${CMAKE_CURRENT_LIST_DIR}
         ${CMAKE_CURRENT_LIST_DIR}/CPM
 
@@ -83,3 +84,20 @@ pico_add_extra_outputs(EMUZ80_RP2040_PCB_Firmware)
 pico_set_binary_type(EMUZ80_RP2040_PCB_Firmware copy_to_ram)
 target_compile_options(EMUZ80_RP2040_PCB_Firmware PRIVATE -O3)
 
+# settings for flashing by the picotool
+target_compile_definitions(EMUZ80_RP2040_PCB_Firmware PRIVATE
+    PICO_STDIO_USB_ENABLE_RESET_VIA_BAUD_RATE=1
+    PICO_STDIO_USB_ENABLE_RESET_VIA_VENDOR_INTERFACE=1
+)
+
+find_program(PICOTOOL_EXE picotool)
+if(PICOTOOL_EXE)
+  add_custom_target(flash
+    COMMAND /bin/bash -lc "exec \"${PICOTOOL_EXE}\" load -f -u -v -x \"${CMAKE_CURRENT_BINARY_DIR}/EMUZ80_RP2040_PCB_Firmware.uf2\" \${PICOTOOL_DEVICE_ARGS:-}"
+    DEPENDS EMUZ80_RP2040_PCB_Firmware
+    USES_TERMINAL
+    COMMENT "Building and flashing EMUZ80_RP2040_PCB_Firmware.uf2 over USB with picotool"
+  )
+else()
+  message(STATUS "picotool not found; the flash target will not be generated")
+endif()
