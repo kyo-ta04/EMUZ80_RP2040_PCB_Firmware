@@ -23,6 +23,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "AE-RP2040.pio.h" // PIO program headers (auto-generated)
+
 // GPIO Pin Definitions
 #define ADRS_BASE 0  // GP0..15: Address Bus A0-15
 #define DATA_BASE 16 // GP16..23: Data Bus
@@ -543,8 +545,8 @@ int main() {
     gpio_set_dir(DATA_BASE + i, GPIO_IN);
     //   gpio_pull_up(i);
   }
-  gpio_init(IORQ_PIN);
-  gpio_set_dir(IORQ_PIN, GPIO_IN);
+  // gpio_init( IORQ_PIN);
+  // gpio_set_dir(IORQ_PIN, GPIO_IN);
   gpio_init(MREQ_PIN);
   gpio_set_dir(MREQ_PIN, GPIO_IN);
   gpio_init(RD_PIN);
