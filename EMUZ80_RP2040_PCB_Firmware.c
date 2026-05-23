@@ -442,13 +442,15 @@ void __time_critical_func(emu_loop)(void) {
   // PIO レジスタ・マスク・ポインタをキャッシュ（ループ外で1回だけ）
   uint8_t * const mem_ptr = memory;
   volatile uint32_t *rxf = (volatile uint32_t *)&pio0_hw->rxf[sm_emu];
-  volatile uint32_t *txf = (volatile uint32_t *)&pio0_hw->txf[sm_emu];
+//  volatile uint32_t *txf = (volatile uint32_t *)&pio0_hw->txf[sm_emu];
+  volatile uint32_t *txf = (volatile uint32_t *)&pio1_hw->txf[sm_emu];
   const uint32_t rxempty_mask = 1u << (PIO_FSTAT_RXEMPTY_LSB + sm_emu);
 
   // MREQ(24) と WR(26) のビットだけを抽出するマスク
   const uint32_t bus_mask = (1u << MREQ_PIN) | (1u << WR_PIN);
   const uint32_t mem_read_state = (1u << WR_PIN); // MREQ=0, WR=1
   const uint32_t mem_write_state = 0;             // MREQ=0, WR=0
+//  uint32_t count = 0;
 
   while (true) {
     // ① PIO RX FIFO 直叩き（SDK関数バイパス）
@@ -478,7 +480,15 @@ void __time_critical_func(emu_loop)(void) {
       }
       clk_pwm_output_on(); // Z80クロック再開
     }
+#if 0
+    if (true) { // デバッグ用 Z80_freq = 20  (20Hz) で使用する
+      printf("%05u MREQ:%d WR:%d RD:%d ADRS:%04X DATA:%02X\n", count,
+             (agpio >> MREQ_PIN) & 1, (agpio >> WR_PIN) & 1,
+             (agpio >> RD_PIN) & 1, (uint16_t)agpio, (uint8_t)(agpio >> DATA_BASE));
+      count++;
     }
+#endif
+  }
 }
 
 //
@@ -609,10 +619,10 @@ int main() {
   // int Z80_freq = 12000000; // 12MHz
   // int Z80_freq = 11000000; // 11MHz
   // int Z80_freq = 10000000; // 10MHz
-  // int Z80_freq = 9000000; // 9MHz
+  int Z80_freq = 9000000; // 9MHz
   // int Z80_freq = 8000000; // 8MHz
-  //int Z80_freq = 7000000; // 7MHz
-  int Z80_freq = 6000000; // 6MHz
+  // int Z80_freq = 7000000; // 7MHz
+  // int Z80_freq = 6000000; // 6MHz
   // int Z80_freq = 5000000; // 5MHz
   // int Z80_freq = 4000000; // 4MHz
   // int Z80_freq = 2500000; // 2.5MHz
@@ -628,8 +638,7 @@ int main() {
   // int Z80_freq = 100000; // 100kHz
   // int Z80_freq = 10000; // 10kHz
   //  int Z80_freq = 20; // 20Hz
-  init_clk_pwm(Z80_freq);
-  init_clk_pwm(Z80_freq);
+   init_clk_pwm(Z80_freq);
   printf("Z80 CLK-ON %fMHz\n", Z80_freq / 1000000.0);
 
   // 1秒後にRESETを解除
