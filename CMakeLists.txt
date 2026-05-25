@@ -92,7 +92,7 @@ target_compile_definitions(EMUZ80_RP2040_PCB_Firmware PRIVATE
 find_program(PICOTOOL_EXE picotool)
 if(PICOTOOL_EXE)
   add_custom_target(flash
-    COMMAND /bin/bash -lc "exec \"${PICOTOOL_EXE}\" load -f -u -v -x \"${CMAKE_CURRENT_BINARY_DIR}/EMUZ80_RP2040_PCB_Firmware.uf2\" \${PICOTOOL_DEVICE_ARGS:-}"
+    COMMAND "${PICOTOOL_EXE}" load -f -u -v -x "${CMAKE_CURRENT_BINARY_DIR}/EMUZ80_RP2040_PCB_Firmware.uf2"
     DEPENDS EMUZ80_RP2040_PCB_Firmware
     USES_TERMINAL
     COMMENT "Building and flashing EMUZ80_RP2040_PCB_Firmware.uf2 over USB with picotool"
