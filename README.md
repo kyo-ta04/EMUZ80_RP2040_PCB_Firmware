@@ -10,8 +10,8 @@ Github -> https://github.com/tendai22/EMUZ80_RP2040_PCB
 このブランチは、ソフトウェアでCPU自体をエミュレーションするのではなく、RP2040/RP2350 の PIO (プログラマブル I/O) サブシステムを利用してメモリや I/O デバイスをエミュレートし、**本物の Z80 マイクロプロセッサ**上で CP/M 2.2 オペレーティングシステムを動作させます。
 
 - **対応ボード**: 秋月電子 AE-RP2040
-- **Z80 動作クロック**: 最大 6MHz
-- **RP2040 動作クロック**: 266MHz
+- **Z80 動作クロック**: 最大 ~~6MHz~~ → 9MHz
+- **RP2040 動作クロック**: 200/288MHz
 - **CP/M メモリ**: 64KB (TPA 62KB)
 - **ROM ディスク**: 5 ドライブ (256KBx4 + 650KB、FlashROM 格納)
 - **RAM ディスク**: 1 ドライブ (128KBKB, SRAM)
@@ -34,7 +34,7 @@ B:ドライブに便利で簡単なコマンド類とXLISP1.1a(修正版)を入�
 | ドライブ | サイズ | 種類 | 内容 |
 |:---:|:---:|:---:|---|
 | **A:** | 256KB | ROM | CP/M 2.2 システムディスク + ユーティリティ (ASM, LOAD, PIP, SYSGEN 等) |
-| **B:** | 256KB | ROM | MS-BASIC 等 |
+| **B:** | 256KB | ROM | MS-BASIC, XLISP 等 |
 | **C:** | 256KB | ROM | Turbo Pascal 3.01a |
 | **D:** | 256KB | ROM | Z80 fig-FORTH 1.1g |
 | **I:** | 650KB | ROM | HI-TECH C v3.09 コンパイラ |
@@ -104,6 +104,7 @@ Raspberry Pi 公式のデータシートでは、GPIO 入力電圧の絶対最�
 - **XLISP 1.1** — David Michael Betz 氏
 - **EMUZ80 プロジェクト** — vintagechips氏 (https://vintagechips.wordpress.com/)
 - **EMUZ80_RP2040_PCB 基板** — tendai22plus氏 (https://github.com/tendai22)
+- **PIO高速化** — @hanyazou氏 (https://github.com/hanyazou)
 
 
 ## ライセンス (License)
@@ -143,20 +144,23 @@ EMUZ80_RP2040_PCB_Firmware/
 ├── EMUZ80_RP2040_xxMHz.uf2      # ビルド済み UF2 ファイル
 ├── AE-RP2040.pio                 # PIO プログラム (Z80 バスエミュレーション)
 ├── CMakeLists.txt                # ビルド設定
-├── rom_data.h                    # ROM ディスクの extern 宣言
 │
-├── bios01.asm / .c / .h          # Z80 CBIOS (z80pack ベース)
-├── ccp_bdos.c / .h               # CP/M 2.2 CCP + BDOS
+├─┬─ CPM/
+│ ├─ bios01.asm / .c / .h          # Z80 CBIOS (z80pack ベース)
+│ ├─ ccp_bdos.c / .h               # CP/M 2.2 CCP + BDOS
+│ ├─ cpm22-1.h / .c    　　　　     # Drive A: システムディスク
+│ ├─ cpm22_disk1.h / .c            # Drive B: ユーティリティ
+│ ├─ cpm22_tp301a.h / .c           # Drive C: Turbo Pascal
+│ ├─ cpm22_z80forth.h / .c         # Drive D: fig-FORTH
+│ └─ cpm22_htc.h / .c              # Drive I: HI-TECH C
 │
-├── cpm22-1.h / cpm22_1.c         # Drive A: システムディスク
-├── cpm22_disk1.h / .c            # Drive B: ユーティリティ
-├── cpm22_tp301a.h / .c           # Drive C: Turbo Pascal
-├── cpm22_z80forth.h / .c         # Drive D: fig-FORTH
-├── cpm22_htc.h / .c              # Drive I: HI-TECH C
+├─┬─ tools/
+│ ├── bin2c.py                     # バイナリ → C 変換ツール
+│ ├── cpm2c.py                     # CP/M ディスクユーティリティ
+│ └── cpm_extract.py               # cpm.bin から CCP + BDOS 抽出
 │
-├── bin2c.py                      # .dsk → C ヘッダ変換ツール
-├── cpm2c.py / cpm_extract.py     # CP/M ディスクユーティリティ
-│
+├──── usr/src/cmd/                 # ASCIART / コマンドソース
+│ 
 ├── img/                          # ドキュメント用画像
 └── LICENSE                       # MIT ライセンス
 ```

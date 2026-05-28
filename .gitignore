@@ -15,3 +15,5 @@ build*/
 *.dis
 *.lst
 error.log
+
+!CPM/*.bin
