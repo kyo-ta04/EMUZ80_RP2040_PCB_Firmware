@@ -163,8 +163,8 @@ EMUZ80_RP2040_PCB_Firmware/
 
 ## ギャラリー
 ### 実行結果
-![img5](./img/img5.jpg)
-![img2](./img/img2.jpg)
+![img5](./img/img6.png)
+![img2](./img/img7.png)
 ### 回路図
 ![img3](./img/img3.jpg)
 ### 基板裏面
