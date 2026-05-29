@@ -39,7 +39,8 @@
 
 // Z80用メモリー
 #define MEMORY_SIZE 65536 // 64KB
-static uint8_t __attribute__((aligned(4))) memory[MEMORY_SIZE] = {[0 ... MEMORY_SIZE - 1] = 0xFF};
+static uint8_t __attribute__((aligned(4))) memory[MEMORY_SIZE] = {
+    [0 ... MEMORY_SIZE - 1] = 0xFF};
 volatile bool stop_flg = false;
 
 // UART/USB 共有バッファ
@@ -52,9 +53,12 @@ volatile uint16_t __attribute__((section(".scratch_x.uart"))) uart_tx_tail = 0; 
 volatile uint8_t __attribute__((section(".scratch_x.uart"))) uart_rxdata = 0;
 volatile uint8_t __attribute__((section(".scratch_x.uart"))) uart_stat = 0;
 #else
-volatile uint8_t __attribute__((section(".scratch_y.uart"))) uart_tx_buf[UART_TX_BUF_SIZE];
-volatile uint16_t __attribute__((section(".scratch_y.uart"))) uart_tx_head = 0; // コア1 (Z80側) が更新
-volatile uint16_t __attribute__((section(".scratch_y.uart"))) uart_tx_tail = 0; // コア0 (UART側) が更新
+volatile uint8_t
+    __attribute__((section(".scratch_y.uart"))) uart_tx_buf[UART_TX_BUF_SIZE];
+volatile uint16_t __attribute__((section(".scratch_y.uart"))) uart_tx_head =
+    0; // コア1 (Z80側) が更新
+volatile uint16_t __attribute__((section(".scratch_y.uart"))) uart_tx_tail =
+    0; // コア0 (UART側) が更新
 
 volatile uint8_t __attribute__((section(".scratch_y.uart"))) uart_rxdata = 0;
 volatile uint8_t __attribute__((section(".scratch_y.uart"))) uart_stat = 0;
@@ -72,28 +76,29 @@ const size_t boot_size = sizeof(boot);
 
 // ====================== ROM/BIOSデータ (extern宣言) ======================
 // 各データは個別の .c ファイルでコンパイルされる
-#include "bios01.h"     // BIOSコード
+#include "bios01.h"   // BIOSコード
 #include "ccp_bdos.h" // CCP BDOSコード
 #include "cpm22_1.h"  // CPM 2.2 Disk Image (Drive A: IBM 8" SD)
 #if 1
 #include "cpm22_disk1.h"    // CPM 2.2 Disk Image (Drive B: IBM 8" HD)
+#include "cpm22_htc.h"      // CPM 2.2 Disk Image (Drive I: 650KB Custom)
 #include "cpm22_tp301a.h"   // CPM 2.2 Disk Image (Drive C: IBM 8" SD)
 #include "cpm22_z80forth.h" // CPM 2.2 Disk Image (Drive D: IBM 8" SD)
-#include "cpm22_htc.h"      // CPM 2.2 Disk Image (Drive I: 650KB Custom)
+
 #endif
 
 // ====================== 仮想ディスク定義 ======================
 // cpm2c.pyで生成された各ROM配列を一つのテーブルにまとめる
 #define ROMDISK_SIZE (256 * 1024) // (128*26*77=256,256 / 256*1024=262,144)
-// const uint8_t *const rom_disks[] = {cpm22_1, cpm22_1, cpm22_1, cpm22_1}; /* デバッグ時は1ドライブ */
-const uint8_t *const rom_disks[] = {cpm22_1, cpm22_disk1, tp301a, z80forth};
+const uint8_t *const rom_disks[] = {cpm22_1, cpm22_1, cpm22_1, cpm22_1}; /*
+// デバッグ時は1ドライブ */
+// const uint8_t *const rom_disks[] = {cpm22_1, cpm22_disk1, tp301a, z80forth};
 
 // B: 仮想RAMディスク (Read/Write) - 十分なサイズを確保
 #define RAMDISK_SIZE (128 * 1024) // 128KB 262,144 (128*26*39)=256256
 static uint8_t __attribute__((aligned(4))) ramdisk[RAMDISK_SIZE] = {
     [0 ... RAMDISK_SIZE - 1] = 0xE5 // E5で埋めて未使用にする
 };
-
 
 //
 // --- Helper: Manual Clock Pulse ---
@@ -110,7 +115,7 @@ static void clk_on_off(int n) {
 
 // --- Helper: Delayed RESET OFF ---
 static int64_t reset_off_callback(alarm_id_t id, void *user_data) {
-  printf("RESET-OFF (Delayed 1s)\n\n");
+  printf("RESET-OFF (Delayed)\n\n");
   gpio_put(RESET_PIN, 1); // RESET-OFF (High)
   return 0;               // ONE_SHOT
 }
@@ -217,7 +222,8 @@ void pio_init_bus() {
   uint offset_emu = pio_add_program(pio, &m_emu_program);
   pio_sm_config c_emu = m_emu_program_get_default_config(offset_emu);
   sm_config_set_in_pins(&c_emu, 0);
-  sm_config_set_in_shift(&c_emu, false, true, 30);  // shift left, auto_push=true, threshold=30
+  sm_config_set_in_shift(&c_emu, false, true,
+                         30); // shift left, auto_push=true, threshold=30
   pio_sm_init(pio, sm_emu, offset_emu, &c_emu);
   pio_sm_set_enabled(pio, sm_emu, true);
 
@@ -244,9 +250,11 @@ void pio_init_bus() {
 
   // SM: data_out (Output to data bus)
   uint offset_data_out = pio_add_program(pio, &data_out_program);
-  pio_sm_config c_data_out = data_out_program_get_default_config(offset_data_out);
+  pio_sm_config c_data_out =
+      data_out_program_get_default_config(offset_data_out);
   sm_config_set_out_pins(&c_data_out, DATA_BASE, 8);
-  sm_config_set_out_shift(&c_data_out, true, true, 8);  // shift right, auto_pull=true, threshold=8
+  sm_config_set_out_shift(&c_data_out, true, true,
+                          8); // shift right, auto_pull=true, threshold=8
   pio_sm_init(pio, sm_data_out, offset_data_out, &c_data_out);
   pio_sm_set_enabled(pio, sm_data_out, true);
 }
@@ -277,7 +285,6 @@ void task1(void) {
   }
 }
 
-
 // グローバル領域（emu_loopの外側）
 static int disk_dma_chan = -1;         // DMAチャネル番号（-1 = 未初期化）
 static volatile bool dma_busy = false; // DMA転送中フラグ
@@ -299,7 +306,8 @@ static uint8_t fdc_status = 0;
 static uint8_t dma_addr_low = 0;
 static uint8_t dma_addr_high = 0;
 
-void __attribute__((noinline)) handle_io_write(uint32_t ioadrs, uint8_t data_byte) {
+void __attribute__((noinline)) handle_io_write(uint32_t ioadrs,
+                                               uint8_t data_byte) {
   switch (ioadrs) {
   case 0x01: { // CONOUT : ポート1
     uint8_t next = (uart_tx_head + 1) % UART_TX_BUF_SIZE;
@@ -324,7 +332,8 @@ void __attribute__((noinline)) handle_io_write(uint32_t ioadrs, uint8_t data_byt
     uint16_t dma_addr_z80 = ((uint16_t)dma_addr_high << 8) | dma_addr_low;
     // オフセット計算 (128バイト * (トラック * 26 + セクタ-1))
     uint32_t logical_sector = (current_sector >= 1) ? (current_sector - 1) : 0;
-    uint32_t disk_offset = ((uint32_t)current_track * 26 + logical_sector) * 128UL;
+    uint32_t disk_offset =
+        ((uint32_t)current_track * 26 + logical_sector) * 128UL;
 
     if (read_write == 0) { // ============== READ ==============
       const uint8_t *src = NULL;
@@ -334,7 +343,7 @@ void __attribute__((noinline)) handle_io_write(uint32_t ioadrs, uint8_t data_byt
         src = rom_disks[current_drive];
         max_size = ROMDISK_SIZE;
       } else if (current_drive == 8) { // I: (ROM 650KB)
-        src = cpm22_htc;   /* htc.c で定義、デバッグ時はコメントアウト */
+        src = cpm22_htc; /* htc.c で定義、デバッグ時はコメントアウト */
         max_size = ROM_DISK_I_SIZE;
       } else if (current_drive == 9) { // J: (RAM 128KB)
         src = ramdisk;
@@ -348,14 +357,13 @@ void __attribute__((noinline)) handle_io_write(uint32_t ioadrs, uint8_t data_byt
         channel_config_set_transfer_data_size(&c, DMA_SIZE_8); // 8bit
         channel_config_set_read_increment(&c, true);
         channel_config_set_write_increment(&c, true);
-        dma_channel_configure(
-            disk_dma_chan, &c,
-            &memory[dma_addr_z80], // 書き込み先（Z80メモリ）
-            src + disk_offset,     // 読み出し元
-            128,                   // 転送数（バイト）
-            true);                 // 即開始
-        dma_busy = true; // DMA開始
-        fdc_status = 0;  // 即OK返却（DMAはバックグラウンド）
+        dma_channel_configure(disk_dma_chan, &c,
+                              &memory[dma_addr_z80], // 書き込み先（Z80メモリ）
+                              src + disk_offset,     // 読み出し元
+                              128,                   // 転送数（バイト）
+                              true);                 // 即開始
+        dma_busy = true;                             // DMA開始
+        fdc_status = 0; // 即OK返却（DMAはバックグラウンド）
       } else {
         memset(&memory[dma_addr_z80], 0xE5, 128);
         fdc_status = 1;
@@ -406,10 +414,11 @@ void __attribute__((noinline)) handle_io_write(uint32_t ioadrs, uint8_t data_byt
   }
 }
 
-uint8_t __attribute__((noinline)) handle_io_read(uint32_t ioadrs, uint32_t agpio) {
+uint8_t __attribute__((noinline)) handle_io_read(uint32_t ioadrs,
+                                                 uint32_t agpio) {
   uint8_t data_byte = 0;
   switch (ioadrs) {
-  case 0x00: // === ポート0 : CONSTA ===
+  case 0x00:               // === ポート0 : CONSTA ===
     data_byte = uart_stat; // 0:not ready, 0xFF:ready
     break;
   case 0x01: // === ポート1 : CONIN ===
@@ -440,9 +449,9 @@ void __time_critical_func(emu_loop)(void) {
   init_disk_dma(); // DMAC 初期化
 
   // PIO レジスタ・マスク・ポインタをキャッシュ（ループ外で1回だけ）
-  uint8_t * const mem_ptr = memory;
+  uint8_t *const mem_ptr = memory;
   volatile uint32_t *rxf = (volatile uint32_t *)&pio0_hw->rxf[sm_emu];
-//  volatile uint32_t *txf = (volatile uint32_t *)&pio0_hw->txf[sm_emu];
+  //  volatile uint32_t *txf = (volatile uint32_t *)&pio0_hw->txf[sm_emu];
   volatile uint32_t *txf = (volatile uint32_t *)&pio1_hw->txf[sm_emu];
   const uint32_t rxempty_mask = 1u << (PIO_FSTAT_RXEMPTY_LSB + sm_emu);
 
@@ -450,11 +459,12 @@ void __time_critical_func(emu_loop)(void) {
   const uint32_t bus_mask = (1u << MREQ_PIN) | (1u << WR_PIN);
   const uint32_t mem_read_state = (1u << WR_PIN); // MREQ=0, WR=1
   const uint32_t mem_write_state = 0;             // MREQ=0, WR=0
-//  uint32_t count = 0;
+                                                  //  uint32_t count = 0;
 
   while (true) {
     // ① PIO RX FIFO 直叩き（SDK関数バイパス）
-    while (pio0_hw->fstat & rxempty_mask) tight_loop_contents();
+    while (pio0_hw->fstat & rxempty_mask)
+      tight_loop_contents();
     uint32_t agpio = *rxf;
 
     // 状態を一括抽出 (1 cycle)
@@ -463,20 +473,19 @@ void __time_critical_func(emu_loop)(void) {
     // ② 圧倒的高頻度の Memory-Read を最速の直線パスにする
     if (__builtin_expect(bus_state == mem_read_state, 1)) {
       *txf = mem_ptr[(uint16_t)agpio]; // Memory-Read
-    } 
-    else if (bus_state == mem_write_state) {
+    } else if (bus_state == mem_write_state) {
       mem_ptr[(uint16_t)agpio] = (uint8_t)(agpio >> DATA_BASE); // Memory-Write
-    } 
-    else { 
+    } else {
       // MREQ=1 (I/Oアクセス)
       clk_pwm_output_off(); // Z80クロック停止
       uint ioadrs = agpio & 0xFF;
-      
+
       if (!(agpio & (1u << WR_PIN))) { // MREQ=1, WR=0  I/O-Write
         uint8_t data_byte = (uint8_t)(agpio >> DATA_BASE);
         handle_io_write(ioadrs, data_byte);
       } else { // I/O-Read
-        *txf = handle_io_read(ioadrs, agpio); // TXF 直接書き込み（Full チェック不要）
+        *txf = handle_io_read(ioadrs,
+                              agpio); // TXF 直接書き込み（Full チェック不要）
       }
       clk_pwm_output_on(); // Z80クロック再開
     }
@@ -496,47 +505,48 @@ void __time_critical_func(emu_loop)(void) {
 //
 int main() {
   uint32_t sysclk = clock_get_hz(clk_sys);
-  int sysvolt = VREG_VOLTAGE_1_15;
+  int sysvolt = vreg_get_voltage();
 
   if (false) { // 高速 コア電圧 クロック 設定
-    sleep_ms(100);
+    sleep_ms(0);
     sysvolt = VREG_VOLTAGE_1_30;
     // sysvolt = VREG_VOLTAGE_1_25;
     vreg_set_voltage(sysvolt);
     sleep_ms(100);
     // sysclk = 400000;
-    // sysclk = 360000; 
-    // sysclk = 336000; 
+    // sysclk = 360000;
+    // sysclk = 336000;
     // sysclk = 312000;
     // sysclk = 300000; // 300MHz 1.3V Z80 10MHz
     sysclk = 288000;
-    // sysclk = 276000;  // 276MHz 1.25V Z80 9MHz 
-    // sysclk = 264000; 
+    // sysclk = 276000;  // 276MHz 1.25V Z80 9MHz
+    // sysclk = 264000;
     // sysclk = 200000;
     if (set_sys_clock_khz(sysclk, true)) {
 #if PICO_RP2040
       // ssi_hw->baudr = 2; // 400MHz / 2 = 200MHz
-      ssi_hw->baudr = 3; // 300MHz / 3 = 100MHz 
-      // ssi_hw->baudr = 4; // 300MHz / 4 = 75MHz 
-      // ssi_hw->baudr = 5; // 300MHz / 5 = 60MHz
+      ssi_hw->baudr = 3; // 300MHz / 3 = 100MHz
+                         // ssi_hw->baudr = 4; // 300MHz / 4 = 75MHz
+                         // ssi_hw->baudr = 5; // 300MHz / 5 = 60MHz
 #endif
     }
-  } else { // 標準　コア電圧 1.15V クロック 200MHz 設定
-    sleep_ms(100);
-    //    vreg_set_voltage(VREG_VOLTAGE_1_15);
+  } else { // 標準　コア電圧 1.10V クロック 200MHz 設定
+    sleep_ms(0);
+    sysvolt = VREG_VOLTAGE_1_10;
     vreg_set_voltage(sysvolt);
     sleep_ms(100);
     sysclk = 200000;
     if (set_sys_clock_khz(sysclk, true)) {
 #if PICO_RP2040
-      ssi_hw->baudr = 2; // 200MHz / 2 = 100MHz
+      // ssi_hw->baudr = 2; // 200MHz / 2 = 100MHz
+      ssi_hw->baudr = 3; // 200MHz / 3 = 66MHz
 #endif
     }
   }
 
-  sleep_ms(100);
+  sleep_ms(0);
   stdio_init_all();
-  sleep_ms(100);
+  sleep_ms(0);
 
   // // Z80用メモリー初期化
   memcpy(memory + 0xE400, ccp_bdos, ccp_bdos_size);
@@ -569,25 +579,25 @@ int main() {
   gpio_set_dir(RESET_PIN, GPIO_OUT);
   gpio_put(RESET_PIN, 0); // RESET ON
 
-
   // ====================== GPIO初期設定はC SDKで（超簡単・安全）
   // ======================
-  gpio_init(PA0_PIN); // ピン初期化（FUNCSEL = SIOに自動設定）
+  gpio_init(PA0_PIN);              // ピン初期化（FUNCSEL = SIOに自動設定）
   gpio_set_dir(PA0_PIN, GPIO_OUT); // 出力方向に設定（SIOのOEも自動でON）
   gpio_put(PA0_PIN, 0);            // 初期値はOFF（任意）
 
   // printf("GPIO 初期設定完了（SDK使用）→ 以後SIO直叩きでON/OFF\n");
-  sleep_ms(100);
+  sleep_ms(0);
 
   // Initial CLK pulses (Python: CLK_OnOff(10))
   clk_on_off(10);
   // PIO初期化
   pio_init_bus();
 
-  sleep_ms(2000);
+  sleep_ms(1000);
   // EMUZ80_RP2040_PCB
   printf("\n** For EMUZ80_RP2040_PCB! **\n");
-  printf("** z80pack - CP/M2.2 CCP+BDOS(E400H-F9FFH), BIOS-01(FA00H-FC2FH) **\n");
+  printf(
+      "** z80pack - CP/M2.2 CCP+BDOS(E400H-F9FFH), BIOS-01(FA00H-FC2FH) **\n");
   printf("** DISK0 A: z80pack cpm2-1.dsk   **\n");
   printf("** DISK1 B: cpm22_disk1.dsk      **\n");
   printf("** DISK2 C: cpm22_tp301a.dsk     **\n");
@@ -601,19 +611,24 @@ int main() {
   printf("\nfor CP/M2.2 v1.1\n");
 
   float volt = 0;
-  if (sysvolt == VREG_VOLTAGE_1_15)
+  if (sysvolt == VREG_VOLTAGE_1_10)
+    volt = 1.10;
+  else if (sysvolt == VREG_VOLTAGE_1_15)
     volt = 1.15;
+  else if (sysvolt == VREG_VOLTAGE_1_20)
+    volt = 1.20;
   else if (sysvolt == VREG_VOLTAGE_1_25)
     volt = 1.25;
   else if (sysvolt == VREG_VOLTAGE_1_30)
     volt = 1.30;
 
   //  エミュレーション開始(core1)
-  printf("AE-RP2040 Core:%0.2fV Clock:%uMHz (I/O CLK-STOP)\n", volt, sysclk / 1000);
+  printf("AE-RP2040 Core:%0.2fV Clock:%uMHz (I/O CLK-STOP)\n", volt,
+         sysclk / 1000);
   printf("Emulation task(core1) Start..\n");
 
   multicore_launch_core1(emu_loop);
-  sleep_ms(1000);
+  sleep_ms(0);
 
   // CLK PWM Setup ,  MAX RP2040 1.3v 288MHz Z80 9MHz
   // int Z80_freq = 12000000; // 12MHz
@@ -638,11 +653,11 @@ int main() {
   // int Z80_freq = 100000; // 100kHz
   // int Z80_freq = 10000; // 10kHz
   //  int Z80_freq = 20; // 20Hz
-   init_clk_pwm(Z80_freq);
+  init_clk_pwm(Z80_freq);
   printf("Z80 CLK-ON %fMHz\n", Z80_freq / 1000000.0);
 
-  // 1秒後にRESETを解除
-  add_alarm_in_ms(1000, reset_off_callback, NULL, false);
+  // 0.1秒後にRESETを解除
+  add_alarm_in_ms(100, reset_off_callback, NULL, false);
 
   printf("main task1(Core0) start..\n");
   task1();
