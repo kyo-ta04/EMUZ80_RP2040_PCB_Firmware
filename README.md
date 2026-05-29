@@ -21,10 +21,6 @@ Github -> https://github.com/tendai22/EMUZ80_RP2040_PCB
 > 本ブランチは **CP/M 2.2 専用**です。ROM-BASIC (EMUBASIC) は搭載していません。
 > EMUBASIC(ROM-BASIC) を使用する場合は [AE-RP2040 ブランチ](https://github.com/kyo-ta04/EMUZ80_RP2040_PCB_Firmware/tree/AE-RP2040) をご利用ください。
 
-B:ドライブに便利で簡単なコマンド類とXLISP1.1a(修正版)を入れました、詳細はこちら：
-- [コマンド・ユーティリティ類](./usr/src/cmd/README.md)
-- [XLISP1.1a(修正版)](https://github.com/kyo-ta04/XLISP11)
-
 こちらもどうぞ:
 - [第1話　Z80が2026年に突然息を吹き返した日　〜RP2040でCP/Mモンスター爆誕！〜 - note](https://note.com/quiet_duck4046/n/n6ee36d5d51e4?sub_rt=share_sb) 
 - [せっかく メモリー64KBになったから CP/M行きたくなってきたw🤔 - X](https://x.com/DragonBallEZ/status/2037853028548808990)
@@ -160,7 +156,7 @@ EMUZ80_RP2040_PCB_Firmware/
 │ └── cpm_extract.py               # cpm.bin から CCP + BDOS 抽出
 │
 ├──── usr/src/cmd/                 # ASCIART / コマンドソース
-│ 
+│              :
 ├── img/                          # ドキュメント用画像
 └── LICENSE                       # MIT ライセンス
 ```
@@ -175,3 +171,8 @@ EMUZ80_RP2040_PCB_Firmware/
 ![img4](./img/img4.jpg)
 ** BUSRQ,INT,NMI,WAITはプルアップ、RESETの LEDもジャンパで接続 **
 
+## 更新履歴
+2026/05/30:
+- @hanyazou氏からのPRからRP2040のPIO部を取り込みと更に高速化 6MHz → 9MHz
+- B:にコマンド類とXLISP1.1aを入れました： - [コマンド](./usr/src/cmd/README.md)、
+[XLISP1.1a(修正版)](https://github.com/kyo-ta04/XLISP11)
