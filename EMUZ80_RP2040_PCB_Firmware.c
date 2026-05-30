@@ -79,7 +79,7 @@ const size_t boot_size = sizeof(boot);
 #include "bios01.h"   // BIOSコード
 #include "ccp_bdos.h" // CCP BDOSコード
 #include "cpm22_1.h"  // CPM 2.2 Disk Image (Drive A: IBM 8" SD)
-#if 0
+#if 1
 #include "cpm22_disk1.h"    // CPM 2.2 Disk Image (Drive B: IBM 8" HD)
 #include "cpm22_tp301a.h"   // CPM 2.2 Disk Image (Drive C: IBM 8" SD)
 #include "cpm22_z80forth.h" // CPM 2.2 Disk Image (Drive D: IBM 8" SD)
@@ -89,9 +89,9 @@ const size_t boot_size = sizeof(boot);
 // ====================== 仮想ディスク定義 ======================
 // cpm2c.pyで生成された各ROM配列を一つのテーブルにまとめる
 #define ROMDISK_SIZE (256 * 1024) // (128*26*77=256,256 / 256*1024=262,144)
-const uint8_t *const rom_disks[] = {cpm22_1, cpm22_1, cpm22_1, cpm22_1}; /*
 // デバッグ時は1ドライブ */
-// const uint8_t *const rom_disks[] = {cpm22_1, cpm22_disk1, tp301a, z80forth};
+// const uint8_t *const rom_disks[] = {cpm22_1, cpm22_1, cpm22_1, cpm22_1}; /*
+const uint8_t *const rom_disks[] = {cpm22_1, cpm22_disk1, tp301a, z80forth};
 
 // B: 仮想RAMディスク (Read/Write) - 十分なサイズを確保
 #define RAMDISK_SIZE (128 * 1024) // 128KB 262,144 (128*26*39)=256256
@@ -342,8 +342,8 @@ void __attribute__((noinline)) handle_io_write(uint32_t ioadrs,
         src = rom_disks[current_drive];
         max_size = ROMDISK_SIZE;
       } else if (current_drive == 8) { // I: (ROM 650KB)
-//        src = cpm22_htc; /* htc.c で定義、デバッグ時はコメントアウト */
-//        max_size = ROM_DISK_I_SIZE;
+        src = cpm22_htc; /* htc.c で定義、デバッグ時はコメントアウト */
+        max_size = ROM_DISK_I_SIZE;
       } else if (current_drive == 9) { // J: (RAM 128KB)
         src = ramdisk;
         max_size = RAMDISK_SIZE;
@@ -636,7 +636,7 @@ int main() {
   // int Z80_freq = 9000000; // 9MHz
   // int Z80_freq = 8000000; // 8MHz
   // int Z80_freq = 7000000; // 7MHz
-  int Z80_freq = 6000000; // 6MHz
+  // int Z80_freq = 6000000; // 6MHz
   // int Z80_freq = 5000000; // 5MHz
   // int Z80_freq = 4000000; // 4MHz
   // int Z80_freq = 2500000; // 2.5MHz
@@ -645,7 +645,7 @@ int main() {
   // int Z80_freq = 700000; // 700kHz
   // int Z80_freq = 600000; // 600kHz
   // int Z80_freq = 500000; // 500kHz
-  // int Z80_freq = 400000; // 400kHz
+  int Z80_freq = 400000; // 400kHz
   // int Z80_freq = 300000; // 300kHz
   // int Z80_freq = 200000; // 200kHz
   // int Z80_freq = 150000; // 150kHz
