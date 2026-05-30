@@ -79,12 +79,11 @@ const size_t boot_size = sizeof(boot);
 #include "bios01.h"   // BIOSコード
 #include "ccp_bdos.h" // CCP BDOSコード
 #include "cpm22_1.h"  // CPM 2.2 Disk Image (Drive A: IBM 8" SD)
-#if 1
+#if 0
 #include "cpm22_disk1.h"    // CPM 2.2 Disk Image (Drive B: IBM 8" HD)
-#include "cpm22_htc.h"      // CPM 2.2 Disk Image (Drive I: 650KB Custom)
 #include "cpm22_tp301a.h"   // CPM 2.2 Disk Image (Drive C: IBM 8" SD)
 #include "cpm22_z80forth.h" // CPM 2.2 Disk Image (Drive D: IBM 8" SD)
-
+#include "cpm22_htc.h"      // CPM 2.2 Disk Image (Drive I: 650KB Custom)
 #endif
 
 // ====================== 仮想ディスク定義 ======================
@@ -343,8 +342,8 @@ void __attribute__((noinline)) handle_io_write(uint32_t ioadrs,
         src = rom_disks[current_drive];
         max_size = ROMDISK_SIZE;
       } else if (current_drive == 8) { // I: (ROM 650KB)
-        src = cpm22_htc; /* htc.c で定義、デバッグ時はコメントアウト */
-        max_size = ROM_DISK_I_SIZE;
+//        src = cpm22_htc; /* htc.c で定義、デバッグ時はコメントアウト */
+//        max_size = ROM_DISK_I_SIZE;
       } else if (current_drive == 9) { // J: (RAM 128KB)
         src = ramdisk;
         max_size = RAMDISK_SIZE;
