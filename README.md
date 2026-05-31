@@ -10,7 +10,7 @@ Github -> https://github.com/tendai22/EMUZ80_RP2040_PCB
 このブランチは、ソフトウェアでCPU自体をエミュレーションするのではなく、RP2040/RP2350 の PIO (プログラマブル I/O) サブシステムを利用してメモリや I/O デバイスをエミュレートし、**本物の Z80 マイクロプロセッサ**上で CP/M 2.2 オペレーティングシステムを動作させます。
 
 - **対応ボード**: 秋月電子 AE-RP2040
-- **Z80 動作クロック**: 最大 ~~6MHz~~ → 9MHz
+- **Z80 動作クロック**: 最大 ~~6MHz~~ → 10MHz
 - **RP2040 動作クロック**: 200/288MHz
 - **CP/M メモリ**: 64KB (TPA 62KB)
 - **ROM ディスク**: 5 ドライブ (256KBx4 + 650KB、FlashROM 格納)
@@ -30,7 +30,7 @@ Github -> https://github.com/tendai22/EMUZ80_RP2040_PCB
 | ドライブ | サイズ | 種類 | 内容 |
 |:---:|:---:|:---:|---|
 | **A:** | 256KB | ROM | CP/M 2.2 システムディスク + ユーティリティ (ASM, LOAD, PIP, SYSGEN 等) |
-| **B:** | 256KB | ROM | MS-BASIC, XLISP 等 |
+| **B:** | 256KB | ROM | MS-BASIC, XLISP, ASCIART, 追加コマンド　等 |
 | **C:** | 256KB | ROM | Turbo Pascal 3.01a |
 | **D:** | 256KB | ROM | Z80 fig-FORTH 1.1g |
 | **I:** | 650KB | ROM | HI-TECH C v3.09 コンパイラ |
@@ -44,7 +44,7 @@ Github -> https://github.com/tendai22/EMUZ80_RP2040_PCB
 
 すぐに書き込んで試せる UF2 ファイルをプロジェクトルートに用意しています。
 
-- `EMUZ80_RP2040_PCB_Firmware.uf2` — 秋月電子 AE-RP2040 用
+- `EMUZ80_RP2040_CPM_xxMHz.uf2` — 秋月電子 AE-RP2040 用
 
 ## ターミナル接続
 
@@ -137,7 +137,7 @@ Raspberry Pi 公式のデータシートでは、GPIO 入力電圧の絶対最�
 ```
 EMUZ80_RP2040_PCB_Firmware/
 ├── EMUZ80_RP2040_PCB_Firmware.c  # メインファームウェア
-├── EMUZ80_RP2040_xxMHz.uf2      # ビルド済み UF2 ファイル
+├── EMUZ80_RP2040_CPM_xxMHz.uf2   # ビルド済み UF2 ファイル
 ├── AE-RP2040.pio                 # PIO プログラム (Z80 バスエミュレーション)
 ├── CMakeLists.txt                # ビルド設定
 │
@@ -145,7 +145,7 @@ EMUZ80_RP2040_PCB_Firmware/
 │ ├─ bios01.asm / .c / .h          # Z80 CBIOS (z80pack ベース)
 │ ├─ ccp_bdos.c / .h               # CP/M 2.2 CCP + BDOS
 │ ├─ cpm22-1.h / .c    　　　　     # Drive A: システムディスク
-│ ├─ cpm22_disk1.h / .c            # Drive B: ユーティリティ
+│ ├─ cpm22_disk1.h / .c            # Drive B: MS-BASIC, XLISP, ASCIART, 追加コマンド等
 │ ├─ cpm22_tp301a.h / .c           # Drive C: Turbo Pascal
 │ ├─ cpm22_z80forth.h / .c         # Drive D: fig-FORTH
 │ └─ cpm22_htc.h / .c              # Drive I: HI-TECH C
@@ -163,8 +163,11 @@ EMUZ80_RP2040_PCB_Firmware/
 
 ## ギャラリー
 ### 実行結果
-![img5](./img/img6.png)
-![img2](./img/img7.png)
+![img8](./img/img8.png)
+
+HI-TECH-C Z80 実行例
+![img9](./img/img9.png)
+
 ### 回路図
 ![img3](./img/img3.jpg)
 ### 基板裏面
@@ -172,7 +175,7 @@ EMUZ80_RP2040_PCB_Firmware/
 ** BUSRQ,INT,NMI,WAITはプルアップ、RESETの LEDもジャンパで接続 **
 
 ## 更新履歴
-2026/05/30:
-- @hanyazou氏からのPRからRP2040のPIO部を取り込みと更に高速化 6MHz → 9MHz
+2026/05/31 v1.2:
+- @hanyazou氏からのPRからRP2040のPIO部を取り込みと更に高速化 6MHz → 10MHz
 - B:にコマンド類とXLISP1.1aを入れました： - [コマンド](./usr/src/cmd/README.md)、
 [XLISP1.1a(修正版)](https://github.com/kyo-ta04/XLISP11)

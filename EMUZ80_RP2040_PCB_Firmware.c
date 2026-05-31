@@ -514,7 +514,7 @@ int main() {
   uint32_t sysclk = clock_get_hz(clk_sys);
   int sysvolt = vreg_get_voltage();
 
-  if (true) { // 高速 コア電圧 クロック 設定
+  if (false) { // 高速 コア電圧 クロック 設定
     sleep_ms(0);
     // sysvolt = VREG_VOLTAGE_1_30;
     sysvolt = VREG_VOLTAGE_1_25;
@@ -615,7 +615,7 @@ int main() {
   printf("\n-hit [Enter] in terminal-\n");
   while (getchar_timeout_us(100) == PICO_ERROR_TIMEOUT)
     ;
-  printf("\nfor CP/M2.2 v1.1\n");
+  printf("\nfor CP/M2.2 v1.2\n");
 
   float volt = 0;
   if (sysvolt == VREG_VOLTAGE_1_10)
@@ -637,16 +637,16 @@ int main() {
   multicore_launch_core1(emu_loop);
   sleep_ms(0);
 
-  // CLK PWM Setup ,  MAX RP2040 1.3v 288MHz Z80 9MHz
+  // CLK PWM Setup ,  MAX RP2040 1.25v 288MHz Z80 10MHz
   // int Z80_freq = 12000000; // 12MHz
   // int Z80_freq = 11000000; // 11MHz
-  int Z80_freq = 10000000; // 10MHz
+  // int Z80_freq = 10000000; // 10MHz
   // int Z80_freq = 9000000; // 9MHz
   // int Z80_freq = 8000000; // 8MHz
   // int Z80_freq = 7000000; // 7MHz
   // int Z80_freq = 6000000; // 6MHz
   // int Z80_freq = 5000000; // 5MHz
-  // int Z80_freq = 4000000; // 4MHz
+  int Z80_freq = 4000000; // 4MHz
   // int Z80_freq = 2500000; // 2.5MHz
   // int Z80_freq = 1000000; // 1MHz
   // int Z80_freq = 800000; // 700kHz
