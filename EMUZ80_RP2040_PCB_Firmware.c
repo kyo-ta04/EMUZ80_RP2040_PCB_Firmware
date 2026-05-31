@@ -170,11 +170,11 @@ static void clk_pwm_set_frequency(uint32_t freq_hz) {
 }
 
 static inline void clk_pwm_output_on(void) {
-  pwm_set_enabled(clk_pwm_slice_num, true);
+  hw_set_bits(&pwm_hw->en, 1u << clk_pwm_slice_num);
 }
 
 static inline void clk_pwm_output_off(void) {
-  pwm_set_enabled(clk_pwm_slice_num, false);
+  hw_clear_bits(&pwm_hw->en, 1u << clk_pwm_slice_num);
 }
 
 static void init_clk_pwm(uint32_t freq_hz) {
@@ -442,23 +442,35 @@ uint8_t __attribute__((noinline)) handle_io_read(uint32_t ioadrs,
   return data_byte;
 }
 
+// --- I/O Bus Handler (noinline: emu_loopのレジスタ圧を下げる) ---
+// I/Oアクセスは低頻度なので別関数に分離し、ホットループのレジスタを解放する
+static void __attribute__((noinline)) __time_critical_func(handle_io_bus)(
+    volatile uint32_t *txf, uint32_t agpio) {
+//  clk_pwm_output_off(); // Z80クロック停止
+  uint ioadrs = agpio & 0xFF;
+  if (!(agpio & (1u << WR_PIN))) {              // MREQ=1, WR=0  I/O-Write
+    handle_io_write(ioadrs, (uint8_t)(agpio >> DATA_BASE));
+  } else {                                      // I/O-Read
+    *txf = handle_io_read(ioadrs, agpio);       // TXF 直接書き込み
+  }
+//  clk_pwm_output_on(); // Z80クロック再開
+}
+
 // --- Main Emulation Loop ---
-// __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
 void __time_critical_func(emu_loop)(void) {
   init_disk_dma(); // DMAC 初期化
 
   // PIO レジスタ・マスク・ポインタをキャッシュ（ループ外で1回だけ）
   uint8_t *const mem_ptr = memory;
-  volatile uint32_t *rxf = (volatile uint32_t *)&pio0_hw->rxf[sm_emu];
-  //  volatile uint32_t *txf = (volatile uint32_t *)&pio0_hw->txf[sm_emu];
-  volatile uint32_t *txf = (volatile uint32_t *)&pio1_hw->txf[sm_emu];
+  volatile uint32_t *const rxf = (volatile uint32_t *)&pio0_hw->rxf[sm_emu];
+  volatile uint32_t *const txf = (volatile uint32_t *)&pio1_hw->txf[sm_emu];
   const uint32_t rxempty_mask = 1u << (PIO_FSTAT_RXEMPTY_LSB + sm_emu);
+  const uint32_t pwm_en_mask = 1u << clk_pwm_slice_num;
 
   // MREQ(24) と WR(26) のビットだけを抽出するマスク
-  const uint32_t bus_mask = (1u << MREQ_PIN) | (1u << WR_PIN);
-  const uint32_t mem_read_state = (1u << WR_PIN); // MREQ=0, WR=1
-  const uint32_t mem_write_state = 0;             // MREQ=0, WR=0
-                                                  //  uint32_t count = 0;
+  const uint32_t bus_mask      = (1u << MREQ_PIN) | (1u << WR_PIN);
+  const uint32_t mem_read_state  = (1u << WR_PIN); // MREQ=0, WR=1
+  const uint32_t mem_write_state = 0u;              // MREQ=0, WR=0
 
   while (true) {
     // ① PIO RX FIFO 直叩き（SDK関数バイパス）
@@ -471,29 +483,25 @@ void __time_critical_func(emu_loop)(void) {
 
     // ② 圧倒的高頻度の Memory-Read を最速の直線パスにする
     if (__builtin_expect(bus_state == mem_read_state, 1)) {
-      *txf = mem_ptr[(uint16_t)agpio]; // Memory-Read
+      // UXTH 1命令でゼロ拡張（LLSLs+LSRSの2命令から削減）
+      uint32_t addr;
+      __asm volatile ("uxth %0, %1" : "=r"(addr) : "r"(agpio));
+      *txf = mem_ptr[addr]; // Memory-Read
     } else if (bus_state == mem_write_state) {
-      mem_ptr[(uint16_t)agpio] = (uint8_t)(agpio >> DATA_BASE); // Memory-Write
+      uint32_t addr;
+      __asm volatile ("uxth %0, %1" : "=r"(addr) : "r"(agpio));
+      mem_ptr[addr] = (uint8_t)(agpio >> DATA_BASE); // Memory-Write
     } else {
-      // MREQ=1 (I/Oアクセス)
-      clk_pwm_output_off(); // Z80クロック停止
-      uint ioadrs = agpio & 0xFF;
-
-      if (!(agpio & (1u << WR_PIN))) { // MREQ=1, WR=0  I/O-Write
-        uint8_t data_byte = (uint8_t)(agpio >> DATA_BASE);
-        handle_io_write(ioadrs, data_byte);
-      } else { // I/O-Read
-        *txf = handle_io_read(ioadrs,
-                              agpio); // TXF 直接書き込み（Full チェック不要）
-      }
-      clk_pwm_output_on(); // Z80クロック再開
+      // MREQ=1 (I/Oアクセス): noinline関数に委譲してレジスタ圧を維持
+      hw_clear_bits(&pwm_hw->en, pwm_en_mask); // Z80クロック停止 (レジスタ直接操作)
+      handle_io_bus(txf, agpio);
+      hw_set_bits(&pwm_hw->en, pwm_en_mask);   // Z80クロック再開 (レジスタ直接操作)
     }
 #if 0
     if (true) { // デバッグ用 Z80_freq = 20  (20Hz) で使用する
-      printf("%05u MREQ:%d WR:%d RD:%d ADRS:%04X DATA:%02X\n", count,
+      printf("%05u MREQ:%d WR:%d RD:%d ADRS:%04X DATA:%02X\n", 0u,
              (agpio >> MREQ_PIN) & 1, (agpio >> WR_PIN) & 1,
              (agpio >> RD_PIN) & 1, (uint16_t)agpio, (uint8_t)(agpio >> DATA_BASE));
-      count++;
     }
 #endif
   }
@@ -506,10 +514,10 @@ int main() {
   uint32_t sysclk = clock_get_hz(clk_sys);
   int sysvolt = vreg_get_voltage();
 
-  if (false) { // 高速 コア電圧 クロック 設定
+  if (true) { // 高速 コア電圧 クロック 設定
     sleep_ms(0);
-    sysvolt = VREG_VOLTAGE_1_30;
-    // sysvolt = VREG_VOLTAGE_1_25;
+    // sysvolt = VREG_VOLTAGE_1_30;
+    sysvolt = VREG_VOLTAGE_1_25;
     vreg_set_voltage(sysvolt);
     sleep_ms(100);
     // sysclk = 400000;
@@ -524,9 +532,9 @@ int main() {
     if (set_sys_clock_khz(sysclk, true)) {
 #if PICO_RP2040
       // ssi_hw->baudr = 2; // 400MHz / 2 = 200MHz
-      ssi_hw->baudr = 3; // 300MHz / 3 = 100MHz
-                         // ssi_hw->baudr = 4; // 300MHz / 4 = 75MHz
-                         // ssi_hw->baudr = 5; // 300MHz / 5 = 60MHz
+      // ssi_hw->baudr = 3; // 300MHz / 3 = 100MHz
+      ssi_hw->baudr = 4; // 300MHz / 4 = 75MHz
+      // ssi_hw->baudr = 5; // 300MHz / 5 = 60MHz
 #endif
     }
   } else { // 標準　コア電圧 1.10V クロック 200MHz 設定
@@ -632,7 +640,7 @@ int main() {
   // CLK PWM Setup ,  MAX RP2040 1.3v 288MHz Z80 9MHz
   // int Z80_freq = 12000000; // 12MHz
   // int Z80_freq = 11000000; // 11MHz
-  // int Z80_freq = 10000000; // 10MHz
+  int Z80_freq = 10000000; // 10MHz
   // int Z80_freq = 9000000; // 9MHz
   // int Z80_freq = 8000000; // 8MHz
   // int Z80_freq = 7000000; // 7MHz
@@ -645,7 +653,7 @@ int main() {
   // int Z80_freq = 700000; // 700kHz
   // int Z80_freq = 600000; // 600kHz
   // int Z80_freq = 500000; // 500kHz
-  int Z80_freq = 400000; // 400kHz
+  // int Z80_freq = 400000; // 400kHz
   // int Z80_freq = 300000; // 300kHz
   // int Z80_freq = 200000; // 200kHz
   // int Z80_freq = 150000; // 150kHz
