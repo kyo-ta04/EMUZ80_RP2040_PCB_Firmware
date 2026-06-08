@@ -244,11 +244,13 @@ __attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
         pio_sm_put_blocking(pio, sm_emu, data_byte);
       }
     }
+#if 0
     if (false) { // デバッグ用 Z80_freq = 20  (20Hz) で使用する
       printf("%05d MREQ:%d WR:%d RD:%d ADRS:%04X DATA:%02X\n", count,
              (agpio >> MREQ_PIN) & 1, (agpio >> WR_PIN) & 1,
              (agpio >> RD_PIN) & 1, adrs_word, (int)data_byte);
     }
+#endif
   }
 }
 
@@ -263,24 +265,24 @@ void set_qspi_clock_divider(uint32_t sys_clock_khz, uint32_t qspi_max_khz) {
 //  メイン関数
 //
 int main() {
-  sleep_ms(100);
+  sleep_ms(0);
   uint32_t sysclk = clock_get_hz(clk_sys);
   int sysvolt = VREG_VOLTAGE_1_15;
 
-  if (false) { // 高速 コア電圧1.3V クロック 360/400MHz 設定
-    sleep_ms(100);
+  if (true) { // 高速 コア電圧1.3V クロック 360/400MHz 設定
+    sleep_ms(0);
     sysvolt = VREG_VOLTAGE_1_30;
     vreg_set_voltage(sysvolt);
     sleep_ms(100);
-    // sysclk = 400000;
-    sysclk = 360000;
+    sysclk = 400000;
+    // sysclk = 360000;
     set_sys_clock_khz(sysclk, true);
     set_qspi_clock_divider(sysclk, 133000); // QSPIクロックを133MHz以下に
-    sleep_ms(100);
+    sleep_ms(0);
   }
   stdio_init_all();
   setbuf(stdout, NULL); // 標準出力のバッファリングを無効化
-  sleep_ms(100);
+  sleep_ms(0);
 
   // Z80用メモリー初期化
   memset(memory, 0xFF, MEMORY_SIZE);
@@ -299,14 +301,14 @@ int main() {
   gpio_set_dir(RESET_PIN, GPIO_OUT);
   gpio_put(RESET_PIN, 0); // RESET ON
 
-  sleep_ms(100);
+  sleep_ms(0);
 
   // Initial CLK pulses (Python: CLK_OnOff(10))
   clk_on_off(10);
   // PIO初期化
   pio_init_bus();
 
-  sleep_ms(2000);
+  sleep_ms(800);
   // EMUZ80_RP2040_PCB
   printf("\n** For EMUZ80_RP2040_PCB! **\n");
   printf("** ROM-DATA: EMUBASIC_IO  **\n");
@@ -324,9 +326,12 @@ int main() {
          sysclk / 1000);
   printf("Emulation task(core1) Start..\n");
   multicore_launch_core1(emu_loop);
-  sleep_ms(1000);
+  sleep_ms(100);
 
-  // CLK PWM Setup, RP2350 400MHz Z80 14MHz, 360MHz Z80 12MHz, 150MHz Z80 6MHz
+  // CLK PWM Setup, RP2350 400MHz Z80 16MHz, 360MHz Z80 12MHz, 150MHz Z80 6MHz
+  // int Z80_freq = 17000000; // 17MHz
+  int Z80_freq = 16000000; // 16MHz
+  // int Z80_freq = 15000000; // 15MHz
   // int Z80_freq = 14000000; // 14MHz
   // int Z80_freq = 12000000; // 12MHz
   // int Z80_freq = 11000000; // 11MHz
@@ -336,7 +341,7 @@ int main() {
   // int Z80_freq = 7000000; // 7MHz
   // int Z80_freq = 6000000; // 6MHz
   // int Z80_freq = 4000000; // 4MHz
-  int Z80_freq = 2500000; // 2.5MHz
+  // int Z80_freq = 2500000; // 2.5MHz
   // int Z80_freq = 20; // 20Hz
   gpio_set_function(CLK_PIN, GPIO_FUNC_PWM);
   uint slice_num = pwm_gpio_to_slice_num(CLK_PIN);
