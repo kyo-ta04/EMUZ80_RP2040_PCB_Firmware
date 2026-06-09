@@ -30,14 +30,26 @@
 #define RESET_PIN 28 // GP28: RESET
 #define CLK_PIN 29   // GP29: CLK
 
-// #define MEMORY_SIZE 2048
-#define MEMORY_SIZE 65536 // 64KB
+// // #define MEMORY_SIZE 2048
+// #define MEMORY_SIZE 65536 // 64KB
+// static uint8_t memory[MEMORY_SIZE];
 
-static uint8_t memory[MEMORY_SIZE];
+// Z80用メモリー
+#define MEMORY_SIZE 65536 // 64KB
+static uint8_t __attribute__((aligned(4))) memory[MEMORY_SIZE] = {
+    [0 ... MEMORY_SIZE - 1] = 0xFF};
 volatile bool stop_flg = false;
-volatile uint8_t uart_txdata = 0;
-volatile uint8_t uart_rxdata = 0;
-volatile uint8_t uart_stat = 1;
+
+
+// volatile uint8_t uart_txdata = 0;
+// volatile uint8_t uart_rxdata = 0;
+// volatile uint8_t uart_stat = 1;
+
+volatile uint8_t __attribute__((section(".scratch_y.uart"))) uart_txdata = 0;
+volatile uint8_t __attribute__((section(".scratch_y.uart"))) uart_rxdata = 0;
+volatile uint8_t __attribute__((section(".scratch_y.uart"))) uart_stat = 1;
+
+
 
 // Test Program (from Python testprg2)
 const uint8_t testprg2[] = {0x21, 0x00, 0x00,  // LD HL, 0000
@@ -69,30 +81,80 @@ static int64_t reset_off_callback(alarm_id_t id, void *user_data) {
   return 0;               // ONE_SHOT
 }
 
-// --- Helper: Set PWM Frequency in Hz (Integer only) ---
-void set_pwm_freq(uint pin, uint32_t freq) {
-  uint slice_num = pwm_gpio_to_slice_num(pin);
+
+// ====================== Z80 CLK PWM 制御 ======================
+static uint clk_pwm_slice_num;
+static uint clk_pwm_channel;
+static bool clk_pwm_initialized = false;
+static uint32_t current_clk_freq = 0;
+
+static void clk_pwm_init(void) {
+  clk_pwm_slice_num = pwm_gpio_to_slice_num(CLK_PIN);
+  clk_pwm_channel = pwm_gpio_to_channel(CLK_PIN);
+  gpio_set_function(CLK_PIN, GPIO_FUNC_PWM);
+
+  pwm_config cfg = pwm_get_default_config();
+  pwm_config_set_clkdiv(&cfg, 1.0f);
+  pwm_config_set_wrap(&cfg, 0);
+  pwm_init(clk_pwm_slice_num, &cfg, false);
+  pwm_set_chan_level(clk_pwm_slice_num, clk_pwm_channel, 0);
+
+  clk_pwm_initialized = true;
+}
+
+static void clk_pwm_set_frequency(uint32_t freq_hz) {
+  if (!clk_pwm_initialized) {
+    clk_pwm_init();
+  }
+
   uint32_t sys_clk = clock_get_hz(clk_sys);
 
   float clkdiv = 1.0f;
-  uint32_t wrap = (sys_clk / freq) - 1;
+  uint32_t wrap = (sys_clk / freq_hz) - 1;
 
   if (wrap > 65535) {
-    // wrap が最大値を越える場合、clkdivを調整
-    clkdiv = (float)sys_clk / (freq * 65536LL);
+    clkdiv = (float)sys_clk / (freq_hz * 65536LL);
     if (clkdiv > 255.9375f) {
       clkdiv = 255.9375f;
     }
-    wrap = (uint32_t)((float)sys_clk / (freq * clkdiv)) - 1;
+    wrap = (uint32_t)((float)sys_clk / (freq_hz * clkdiv)) - 1;
     if (wrap > 65535) {
       wrap = 65535;
     }
   }
 
-  pwm_set_clkdiv(slice_num, clkdiv);
-  pwm_set_wrap(slice_num, wrap);
-  pwm_set_gpio_level(pin, (wrap + 1) / 2);
+  pwm_config cfg = pwm_get_default_config();
+  pwm_config_set_clkdiv(&cfg, clkdiv);
+  pwm_config_set_wrap(&cfg, (uint16_t)wrap);
+  pwm_init(clk_pwm_slice_num, &cfg, false);
+  pwm_set_chan_level(clk_pwm_slice_num, clk_pwm_channel, (wrap + 1) / 2);
+
+  current_clk_freq = freq_hz;
 }
+
+static inline void clk_pwm_output_on(void) {
+  hw_set_bits(&pwm_hw->en, 1u << clk_pwm_slice_num);
+}
+
+static inline void clk_pwm_output_off(void) {
+  hw_clear_bits(&pwm_hw->en, 1u << clk_pwm_slice_num);
+}
+
+static void init_clk_pwm(uint32_t freq_hz) {
+  clk_pwm_init();
+  clk_pwm_set_frequency(freq_hz);
+  clk_pwm_output_on();
+}
+
+
+
+// QSPIクロックを調整する関数
+void set_qspi_clock_divider(uint32_t sys_clock_khz, uint32_t qspi_max_khz) {
+  uint32_t divider = (sys_clock_khz + qspi_max_khz - 1) / qspi_max_khz;
+  clock_configure(clk_peri, 0, CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_CLKSRC_PLL_SYS,
+                  sys_clock_khz * 1000, sys_clock_khz * 1000 / divider);
+}
+
 
 // PIO0
 uint sm_emu = 1;
@@ -194,71 +256,68 @@ void task1(void) {
         }
         uart_rxdata = (uint8_t)c;
         uart_stat |= 0x01; // RX Data Available
+        // printf("[%c]",c);
       }
     }
     sleep_ms(1);
   }
 }
 
-// --- Main Emulation Loop ---
-__attribute__((noinline)) void __time_critical_func(emu_loop)(void) {
-  PIO pio = pio0;
-  uint count = 0;
-  uint8_t data_byte = 0;
-  while (true) {
-    // バスライン取得
-    // GP0-29(A0-15=GP0-15,D0-7=GP16-23,MREQ=GP24,RD=GP25,WR=GP26,WAIT=GP27,RESET=GP28,CLK=GP29)
-    const uint32_t mreq_mask = (1u << MREQ_PIN);
-    const uint32_t wr_mask = (1u << WR_PIN);
-    uint32_t agpio = pio_sm_get_blocking(pio, sm_emu);
-    uint32_t adrs_word = (agpio & 0xFFFF);
-
-    count++;
-    if (!(agpio & mreq_mask)) { // MREQ=0 メモリアクセス
-      if (!(agpio & wr_mask)) { // MREQ=0, WR=0  Memory-Write
-        data_byte = (uint8_t)(agpio >> DATA_BASE);
-        if (adrs_word >= 0x8000) {
-          memory[adrs_word] = data_byte;
-        }
-      } else { // MREQ=0, WR=1  Memory-Read (not Write)
-        data_byte = memory[adrs_word];
-        pio_sm_put_blocking(pio, sm_emu, data_byte);
-      }
-    } else { // MREQ=1  I/Oアクセス
-      uint ioadrs = adrs_word & 0xFF;
-      if (!(agpio & wr_mask)) { // MREQ=1, WR=0  I/O-Write (not Memory-access)
-        data_byte = (uint8_t)(agpio >> DATA_BASE);
-        if (ioadrs == 0x00) { // UART TX data
-          uart_txdata = data_byte;
-          uart_stat = uart_stat & 0xFD; // b2=0: TX busy
-        }
-      } else {                // MREQ=1, WR=1  I/O-Read (not Memory-access)
-        if (ioadrs == 0x01) { // UART status
-          data_byte = uart_stat;
-        } else if (ioadrs == 0x00) { // UART RX data
-          data_byte = uart_rxdata;
-          uart_stat &= 0xFE; // RX Data Empty (Clear bit 0)
-        } else {
-          data_byte = (uint8_t)(agpio >> DATA_BASE);
-        }
-        pio_sm_put_blocking(pio, sm_emu, data_byte);
-      }
+// --- I/O Handler (noinline: emu_loop のホットパスからレジスタ圧迫を排除) ---
+__attribute__((noinline))
+static void handle_io(uint32_t agpio, volatile uint32_t *txf) {
+  const uint32_t wr_mask = (1u << WR_PIN);
+  if (!(agpio & wr_mask)) { // MREQ=1, WR=0  I/O-Write (not Memory-access)
+    if ((uint8_t)agpio == 0x00) { // UART TX data
+      uart_txdata = (uint8_t)(agpio >> DATA_BASE);
+      uart_stat = uart_stat & 0xFD; // b2=0: TX busy
     }
-#if 0
-    if (false) { // デバッグ用 Z80_freq = 20  (20Hz) で使用する
-      printf("%05d MREQ:%d WR:%d RD:%d ADRS:%04X DATA:%02X\n", count,
-             (agpio >> MREQ_PIN) & 1, (agpio >> WR_PIN) & 1,
-             (agpio >> RD_PIN) & 1, adrs_word, (int)data_byte);
+  } else {                // MREQ=1, WR=1  I/O-Read (not Memory-access)
+    if ((uint8_t)agpio == 0x01) { // UART status
+      *txf = uart_stat;
+    } else if ((uint8_t)agpio == 0x00) { // UART RX data
+      *txf = uart_rxdata;
+      uart_stat &= 0xFE; // RX Data Empty (Clear bit 0)
+    } else {
+      *txf = (uint8_t)(agpio >> DATA_BASE);
     }
-#endif
   }
 }
 
-// QSPIクロックを調整する関数
-void set_qspi_clock_divider(uint32_t sys_clock_khz, uint32_t qspi_max_khz) {
-  uint32_t divider = (sys_clock_khz + qspi_max_khz - 1) / qspi_max_khz;
-  clock_configure(clk_peri, 0, CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_CLKSRC_PLL_SYS,
-                  sys_clock_khz * 1000, sys_clock_khz * 1000 / divider);
+// --- Main Emulation Loop ---
+void __time_critical_func(emu_loop)(void) {
+  // PIO レジスタ・マスク・ポインタをキャッシュ（ループ外で1回だけ）
+  uint8_t *const mem_ptr = memory;
+  const uint32_t rxempty_mask = (1u << (PIO_FSTAT_RXEMPTY_LSB + sm_emu));
+
+  volatile uint32_t *const rxf = (volatile uint32_t *)&pio0_hw->rxf[sm_emu];
+  volatile uint32_t *const txf = (volatile uint32_t *)&pio0_hw->txf[sm_emu];
+
+  // MREQ(24) と WR(26) のビットだけを抽出するマスク
+  const uint32_t bus_mask      = (1u << MREQ_PIN) | (1u << WR_PIN);
+  const uint32_t mem_read_state  = (1u << WR_PIN); // MREQ=0, WR=1
+  const uint32_t mem_write_state = 0u;              // MREQ=0, WR=0
+
+  while (true) {
+    // PIOのRX FIFOからデータを取得する(ブロッキング)
+    while (pio0_hw->fstat & rxempty_mask) {
+      tight_loop_contents();
+    }
+    uint32_t agpio = *rxf;
+    uint32_t adrs_word = (agpio & 0xFFFF);
+    uint32_t bus_state = agpio & bus_mask;
+
+    // Memory-Read を最速の直線パスにする (最頻出)
+    if (__builtin_expect(bus_state == mem_read_state, 1)) {
+      *txf = mem_ptr[adrs_word]; // Memory-Read
+    } else if (bus_state == mem_write_state) {
+      mem_ptr[adrs_word] = (uint8_t)(agpio >> DATA_BASE); // Memory-Write
+    } else {   // MREQ=1  I/Oアクセス
+      clk_pwm_output_off();   // Z80クロック停止 (inline)
+      handle_io(agpio, txf);
+      clk_pwm_output_on();    // Z80クロック再開 (inline)
+    }
+  }
 }
 
 //
@@ -329,8 +388,9 @@ int main() {
   sleep_ms(100);
 
   // CLK PWM Setup, RP2350 400MHz Z80 16MHz, 360MHz Z80 12MHz, 150MHz Z80 6MHz
-  // int Z80_freq = 17000000; // 17MHz
-  int Z80_freq = 16000000; // 16MHz
+  // int Z80_freq = 18000000; // 17MHz
+   int Z80_freq = 17000000; // 17MHz
+  // int Z80_freq = 16000000; // 16MHz
   // int Z80_freq = 15000000; // 15MHz
   // int Z80_freq = 14000000; // 14MHz
   // int Z80_freq = 12000000; // 12MHz
@@ -345,8 +405,9 @@ int main() {
   // int Z80_freq = 20; // 20Hz
   gpio_set_function(CLK_PIN, GPIO_FUNC_PWM);
   uint slice_num = pwm_gpio_to_slice_num(CLK_PIN);
-  set_pwm_freq(CLK_PIN, Z80_freq);
-  pwm_set_enabled(slice_num, true);
+//  set_pwm_freq(CLK_PIN, Z80_freq);
+  init_clk_pwm(Z80_freq);
+  // pwm_set_enabled(slice_num, true);
   printf("Z80 CLK-ON %fMHz\n", Z80_freq / 1000000.0);
 
   // 1秒後にRESETを解除
