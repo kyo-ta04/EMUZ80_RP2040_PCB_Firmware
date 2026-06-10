@@ -30,9 +30,6 @@
 #define RESET_PIN 28 // GP28: RESET
 #define CLK_PIN 29   // GP29: CLK
 
-// // #define MEMORY_SIZE 2048
-// #define MEMORY_SIZE 65536 // 64KB
-// static uint8_t memory[MEMORY_SIZE];
 
 // Z80用メモリー
 #define MEMORY_SIZE 65536 // 64KB
@@ -40,10 +37,6 @@ static uint8_t __attribute__((aligned(4))) memory[MEMORY_SIZE] = {
     [0 ... MEMORY_SIZE - 1] = 0xFF};
 volatile bool stop_flg = false;
 
-
-// volatile uint8_t uart_txdata = 0;
-// volatile uint8_t uart_rxdata = 0;
-// volatile uint8_t uart_stat = 1;
 
 volatile uint8_t __attribute__((section(".scratch_y.uart"))) uart_txdata = 0;
 volatile uint8_t __attribute__((section(".scratch_y.uart"))) uart_rxdata = 0;
@@ -264,8 +257,8 @@ void task1(void) {
 }
 
 // --- I/O Handler (noinline: emu_loop のホットパスからレジスタ圧迫を排除) ---
-__attribute__((noinline))
-static void handle_io(uint32_t agpio, volatile uint32_t *txf) {
+__attribute__((noinline)) void handle_io(uint32_t agpio, volatile uint32_t *txf) {
+// static void handle_io(uint32_t agpio, volatile uint32_t *txf) {
   const uint32_t wr_mask = (1u << WR_PIN);
   if (!(agpio & wr_mask)) { // MREQ=1, WR=0  I/O-Write (not Memory-access)
     if ((uint8_t)agpio == 0x00) { // UART TX data
@@ -284,7 +277,129 @@ static void handle_io(uint32_t agpio, volatile uint32_t *txf) {
   }
 }
 
+
+#ifndef USE_EMU_LOOP_ASM
+#define USE_EMU_LOOP_ASM 1
+#endif
+
 // --- Main Emulation Loop ---
+// プロトタイプ宣言 (ASM版でもリンク時にシンボルを提供するため)
+// void emu_loop(void);
+
+#if USE_EMU_LOOP_ASM
+// ============================================================
+// 【ASM版 emu_loop】 - ファイル分割なし / #if 切替専用実装
+// ------------------------------------------------------------
+// 基にしたディスアセンブルリスト:
+//   -O3 -mcpu=cortex-m33 相当でコンパイルされた現在の C版 emu_loop() の
+//   arm-none-eabi-objdump -d 出力 (build/EMUZ80_RP2040_PCB_Firmware.dis など)
+//   から、レジスタ割り付け・命令順・最適化パターンをほぼ忠実に再現。
+//
+// 【最適化のポイント (C版と共通)】
+//   * ループに入る前に「頻繁に使う値」をレジスタへ一括キャッシュ
+//       r9  = memory ベース (64KB Z80 RAM)
+//       r1  = &pio0->txf[sm_emu]   (Z80 へのデータ出力 FIFO)
+//       r6  = &pio0->rxf[sm_emu]   (Z80 からの (addr|data|ctrl) 入力 FIFO)
+//       r4  = RXEMPTY ビットマスク (1<<(PIO_FSTAT_RXEMPTY_LSB + sm))
+//       sl  = &clk_pwm_slice_num (I/O時のみ使用)
+//       r7/r8 = PWM 原子操作用 SET/CLR エイリアスベース (0x400aa000 / 0x400ab000)
+//   * Memory Read を「一番最初の条件分岐」にして最速直線パス化
+//       (Z80 実機で最も多いバスサイクルが MemRead であるため)
+//   * while (fstat & mask) { tight } のポーリングを 2命令ループに
+//   * I/O アクセスのみ「低頻度」として分岐。クロック停止に直接 PWM レジスタ
+//     原子ストア (str to alias) を使い、C 関数呼び出しは handle_io のみ。
+//   * handle_io 呼び出し前後で r0=agpio, r1=txf を保持したまま bl するため
+//     余計な mov は不要 (コンパイラが自動的にそうしていたのを踏襲)
+//
+// 【レジスタマップ (ループ内主なもの)】
+//   r0  : agpio (受信した 32bit: [31:24]制御 | [23:16]data | [15:0]addr )
+//   r2  : アドレス (uxth で下16bit抽出)
+//   ip  : ライトデータ一時 (mov.w ip, r0, lsr #16)
+//   r3  : 作業レジスタ (bus_state 抽出結果、fstat 値など)
+//   fp  : PWM イネーブルビット (I/O path のみ)
+//
+// 【注意】
+//   - この関数は Core1 で永遠に回る __time_critical ホットパス。
+//   - 停止は Core0 の task1 側で Ctrl-D により別ルートで扱う (この中では stop_flg を見ない)
+//   - 切替はビルド時に USE_EMU_LOOP_ASM=0/1 で。ASM=1 の時は下の asm() が実体を提供。
+// ============================================================
+__attribute__((naked, noreturn, __time_critical__))
+void emu_loop(void) {
+  __asm__ volatile (
+    ".syntax unified\n"
+    ".thumb\n"
+    // C ABI に従い使用レジスタを退避 (r3 も含むのはコンパイラ生成に合わせた)
+    "stmdb   sp!, {r3, r4, r5, r6, r7, r8, r9, sl, fp, lr}\n"
+    "movs    r4, #1\n"
+    "ldr     r3, =sm_emu\n"              // sm_emu (現在は1固定) のアドレス取得
+    "ldr     r1, =0x50200010\n"          // PIO0 TX FIFO ベース (sm 調整前)。txf[0] = 0x50200010
+    "ldr     r3, [r3]\n"                 // r3 = sm_emu の値 (1)
+    "ldr     r9, =memory\n"              // r9 = Z80 エミュレーション用 64KB メモリ先頭 (&memory[0])
+    "lsls    r6, r3, #2\n"               // r6 = sm * 4  (バイトオフセット計算用)
+    "adds    r1, r6\n"                   // r1 = &txf[sm]   ここが Z80 への応答データ書込み先
+    "adds    r3, #8\n"                   // r3 = sm + 8    → fstat の RXEMPTY ビット位置 (LSB=8 + sm)
+    "add.w   r6, r6, #0x50000000\n"
+    "ldr.w   sl, =clk_pwm_slice_num\n"   // I/O パスで「今どの PWM スライスで CLK を出しているか」を得るためのポインタ
+    "ldr.w   r5, =0x50200000\n"          // r5 = PIO0 レジスタベース (fstat は +4)
+    "ldr.w   r8, =0x400ab000\n"          // r8 = PWM ペリフェラル CLR エイリアスベース (原子クリア)
+    "ldr     r7, =0x400aa000\n"          // r7 = PWM ペリフェラル SET エイリアスベース (原子セット)
+    "add.w   r6, r6, #0x200020\n"        // r6 = 0x50200020 + (sm*4)  → &rxf[sm]  (Z80から来る addr+data+busstate の受信元)
+    "lsls    r4, r3\n"                   // r4 = 1 << (sm+8)   これが RXEMPTY 検出マスクになる
+
+    // ========================================================
+    //  メインループ (超ホットパス)
+    //   - PIO RX FIFO が空なら fstat ポーリングで待つ
+    //   - 1 回受信したら即アドレス・バス状態をデコード
+    // ========================================================
+"1:\n"                                   // poll_loop (ローカルラベル)
+    "ldr     r3, [r5, #4]\n"             // r3 = pio0->fstat
+    "tst     r3, r4\n"                   // RXEMPTY ビットが立っているか？
+    "bne.n   1b\n"                       // 立っていればまだデータなし → 即ループ (2命令の超軽量ポーリング)
+
+    "ldr     r0, [r6]\n"     // agpio = *rxf[sm] (32bit一括) [15:0]=A0-15, [23:16]=D0-7(ライト時有効),[26]=WR#,[24]=MREQ#
+    "and.w   r3, r0, #0x05000000\n"      // bus_state = agpio & 0x05000000 (MREQ|WR の 2bit のみ抽出)
+    "cmp.w   r3, #0x04000000\n"          // 0x04000000 == (MREQ=0, WR=1) → Memory Read
+    "uxth    r2, r0\n"                   // r2 = アドレス (下位16bitをゼロ拡張で取り出し)
+    "bne.n   2f\n"                       // Read でなければ分岐
+    
+    // ---- Memory Read (最もホットな直線パス) ----
+    "ldrb    r3, [r9, r2]\n"             // r3 = memory[address]   8bit ロード
+    "str     r3, [r1]\n"                 // *txf[sm] = data        PIO経由で Z80 データバスへ出力
+    "b.n     1b\n"
+
+"2:\n"
+    "mov.w   ip, r0, lsr #16\n"          // ip = (agpio >> 16) & 0xff   ライトデータを取り出し
+    "cbnz    r3, 3f\n"                   // bus_state 抽出結果(r3)が 0 でなければ I/O アクセス
+
+    // ---- Memory Write ----
+    "strb    ip, [r9, r2]\n"             // memory[address] = data
+    "b.n     1b\n"
+
+"3:\n" // ---- I/O Read/Write ----
+       //   ここに来るのは低頻度。クロックを止めて C の handle_io を呼ぶ
+    "mov.w   fp, #1\n"                   // PWM 直接操作を再現(インライン展開された clk_pwm_output_off/on)
+    "ldr.w   r3, [sl]\n"                 // r3 = clk_pwm_slice_num の現在値
+    "lsl.w   fp, fp, r3\n"               // fp = (1 << slice_num)
+    "str.w   fp, [r8, #0xf0]\n"          // PWM->en の CLR エイリアスへ書込み → 指定ビットだけ即時クリア (CLK 停止)
+    
+    "bl      handle_io\n"                // handle_io(agpio in r0, txf in r1) 呼び出し規約により r0/r1を引数として渡せる
+   
+    "str.w   fp, [r7, #0xf0]\n"          // PWM->en の SET エイリアスへ書込み → ビットセット (CLK 再開)
+    "b.n     1b\n"
+
+    : /* no outputs */
+    : /* none */
+    : "cc", "memory", "r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7", 
+      "r8", "r9", "sl", "fp", "ip", "lr"
+  );
+}
+#else
+// ============================================================
+// オリジナル C 版 emu_loop (USE_EMU_LOOP_ASM == 0 のとき)
+//   - ロジックが明確
+//   - PIO FIFO ポーリング + Memory R/W 最速化 + I/O 時はクロック停止
+//   - handle_io は noinline でレジスタを圧迫しない
+// ============================================================
 void __time_critical_func(emu_loop)(void) {
   // PIO レジスタ・マスク・ポインタをキャッシュ（ループ外で1回だけ）
   uint8_t *const mem_ptr = memory;
@@ -319,6 +434,7 @@ void __time_critical_func(emu_loop)(void) {
     }
   }
 }
+#endif
 
 //
 //  メイン関数
@@ -381,11 +497,16 @@ int main() {
     volt = 1.30;
 
   //  エミュレーション開始(core1)
-  printf("\nWaveshare RP2350-Zero Core:%0.2fV Clock:%dMHz\n", volt,
+  #if USE_EMU_LOOP_ASM
+  printf("\nWaveshare RP2350-Zero v1.1-ASM Core:%0.2fV Clock:%dMHz\n", volt,
          sysclk / 1000);
+  #else
+  printf("\nWaveshare RP2350-Zero v1.1-C Core:%0.2fV Clock:%dMHz\n", volt,
+         sysclk / 1000);
+  #endif
   printf("Emulation task(core1) Start..\n");
   multicore_launch_core1(emu_loop);
-  sleep_ms(100);
+  sleep_ms(0);
 
   // CLK PWM Setup, RP2350 400MHz Z80 16MHz, 360MHz Z80 12MHz, 150MHz Z80 6MHz
   // int Z80_freq = 18000000; // 17MHz
@@ -411,7 +532,7 @@ int main() {
   printf("Z80 CLK-ON %fMHz\n", Z80_freq / 1000000.0);
 
   // 1秒後にRESETを解除
-  add_alarm_in_ms(1000, reset_off_callback, NULL, false);
+  add_alarm_in_ms(100, reset_off_callback, NULL, false);
 
   printf("main task1(Core0) start..\n");
   task1();
