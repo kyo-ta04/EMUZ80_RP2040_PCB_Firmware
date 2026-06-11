@@ -30,20 +30,6 @@
 #define RESET_PIN 28 // GP28: RESET
 #define CLK_PIN 29   // GP29: CLK
 
-
-// Z80用メモリー
-// 64KB のエミュレーション RAM。
-// aligned(65536) の理由 (RP2350A SRAM構造):
-//   - RP2350 のメインSRAMは 64KB 単位のバンク（独立アクセス可能な複数バンク）に分かれている。
-//   - ちょうど 64KB のバッファを 64KB 境界に配置すると、**1つのSRAMバンクに完全に収まる**。
-//   - これにより、バンク間の競合（core0 + core1 + PIO + DMA など同時アクセス時）を減らし、
-//     低レイテンシで安定したアクセスが期待できる。
-//   - emu_loop (Core1) がメインでこのメモリを激しく叩く構成では特に意味がある。
-//   - 64KB未満のaligned(4)だけだと、バンク境界をまたぐ可能性が出てパフォーマンスに影響しやすい。
-//
-// 副次的効果:
-//   - リンカがこの配列を 64KB 境界に強制配置してくれる。
-//   - 将来的にバンク専用配置（リンカスクリプトで .ram_bankX など）にもつなげやすい。
 #define MEMORY_SIZE 65536 // 64KB
 static uint8_t __attribute__((aligned(65536))) memory[MEMORY_SIZE];
 volatile bool stop_flg = false;
