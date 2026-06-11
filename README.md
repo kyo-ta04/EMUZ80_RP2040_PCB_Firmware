@@ -6,6 +6,10 @@ EMUZ80_RP2040は実物の Z80 CPU を RP2040 または RP2350 搭載ボードで
 
 github -> https://github.com/tendai22/EMUZ80_RP2040_PCB
 
+## Ver1.1
+ - Z80バスエミュレーションの高速化で 17MHz動作。
+ - 研究用に emu_loop()のアセンブラ化と解説コメントを追加しました。
+
 **注意：**
 - 2026/3/22追記： GPIO26(WR#)を入力に使用していたため保護抵抗を入れました、GPIO28,20(RESET#,CLK)は出力ですが念のため保護抵抗を入れました。
 
@@ -77,7 +81,7 @@ Raspberry Pi 公式のデータシートでは、GPIO 入力電圧の絶対最�
 
 ## ギャラリー
 ### 実行結果
-![img6](./img/img6.jpg)
+![img6](./img/img7.png)
 ### 回路図
 ![img3](./img/img3.jpg)
 ### 基板裏面

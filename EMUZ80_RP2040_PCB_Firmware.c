@@ -26,33 +26,34 @@
 #define MREQ_PIN 24  // GP24: MREQ
 #define RD_PIN 25    // GP25: RD
 #define WR_PIN 26    // GP26: WR
-#define WAIT_PIN 27  // GP27: WAIT
+// #define WAIT_PIN 27  // GP27: WAIT
 #define RESET_PIN 28 // GP28: RESET
 #define CLK_PIN 29   // GP29: CLK
 
 
 // Z80用メモリー
+// 64KB のエミュレーション RAM。
+// aligned(65536) の理由 (RP2350A SRAM構造):
+//   - RP2350 のメインSRAMは 64KB 単位のバンク（独立アクセス可能な複数バンク）に分かれている。
+//   - ちょうど 64KB のバッファを 64KB 境界に配置すると、**1つのSRAMバンクに完全に収まる**。
+//   - これにより、バンク間の競合（core0 + core1 + PIO + DMA など同時アクセス時）を減らし、
+//     低レイテンシで安定したアクセスが期待できる。
+//   - emu_loop (Core1) がメインでこのメモリを激しく叩く構成では特に意味がある。
+//   - 64KB未満のaligned(4)だけだと、バンク境界をまたぐ可能性が出てパフォーマンスに影響しやすい。
+//
+// 副次的効果:
+//   - リンカがこの配列を 64KB 境界に強制配置してくれる。
+//   - 将来的にバンク専用配置（リンカスクリプトで .ram_bankX など）にもつなげやすい。
 #define MEMORY_SIZE 65536 // 64KB
-static uint8_t __attribute__((aligned(4))) memory[MEMORY_SIZE] = {
-    [0 ... MEMORY_SIZE - 1] = 0xFF};
+static uint8_t __attribute__((aligned(65536))) memory[MEMORY_SIZE];
 volatile bool stop_flg = false;
-
 
 volatile uint8_t __attribute__((section(".scratch_y.uart"))) uart_txdata = 0;
 volatile uint8_t __attribute__((section(".scratch_y.uart"))) uart_rxdata = 0;
 volatile uint8_t __attribute__((section(".scratch_y.uart"))) uart_stat = 1;
 
-
-
-// Test Program (from Python testprg2)
-const uint8_t testprg2[] = {0x21, 0x00, 0x00,  // LD HL, 0000
-                            0x22, 0x00, 0x80,  // LD (8000), HL
-                            0x23,              // INC HL
-                            0xC3, 0x03, 0x00}; // JP 0003
-
 // ROM-BASIC (EMUZ80のEMUBASIC)
 // @tendai22plusさんによる UART I/Oアクセス改造版
-#define EMUBASIC_IO
 #include "emubasic_io.h"
 
 // --- Helper: Manual Clock Pulse ---
@@ -69,7 +70,7 @@ static void clk_on_off(int n) {
 
 // --- Helper: Delayed RESET OFF ---
 static int64_t reset_off_callback(alarm_id_t id, void *user_data) {
-  printf("RESET-OFF (Delayed 1s)\n");
+  printf("RESET-OFF (Delayed 0.1s)\n");
   gpio_put(RESET_PIN, 1); // RESET-OFF (High)
   return 0;               // ONE_SHOT
 }
@@ -277,23 +278,26 @@ __attribute__((noinline)) void handle_io(uint32_t agpio, volatile uint32_t *txf)
   }
 }
 
-
 #ifndef USE_EMU_LOOP_ASM
 #define USE_EMU_LOOP_ASM 1
 #endif
 
-// --- Main Emulation Loop ---
-// プロトタイプ宣言 (ASM版でもリンク時にシンボルを提供するため)
-// void emu_loop(void);
-
 #if USE_EMU_LOOP_ASM
 // ============================================================
-// 【ASM版 emu_loop】 - ファイル分割なし / #if 切替専用実装
-// ------------------------------------------------------------
-// 基にしたディスアセンブルリスト:
-//   -O3 -mcpu=cortex-m33 相当でコンパイルされた現在の C版 emu_loop() の
-//   arm-none-eabi-objdump -d 出力 (build/EMUZ80_RP2040_PCB_Firmware.dis など)
-//   から、レジスタ割り付け・命令順・最適化パターンをほぼ忠実に再現。
+// 【ASM版 emu_loop() Z80バス・エミュレーション】 
+// - トップレベル asm(...) による完全記述版
+//   ファイル分割なし / #if USE_EMU_LOOP_ASM で切替
+//
+// この版は C版を -O3 でコンパイルした実際の elf の逆アセンブル結果を
+// ベースに、命令・分岐・構造を極力忠実に再現した手書きアセンブリです。
+//
+// 重要なポイント:
+//   - .section .time_critical.emu_loop を明示（C版の __time_critical_func と同等）
+//   - naked ではなくトップレベル asm で提供（属性の無視や配置のずれを回避）
+//   - ポーリングは C版と同じタイトな bne 構造
+//   - I/O パスも C版と同じシンプルな stop / bl / resume
+//
+// これで C版と「本体命令 + 配置」の両面で最も近い状態になります。
 //
 // 【最適化のポイント (C版と共通)】
 //   * ループに入る前に「頻繁に使う値」をレジスタへ一括キャッシュ
@@ -323,113 +327,117 @@ __attribute__((noinline)) void handle_io(uint32_t agpio, volatile uint32_t *txf)
 //   - 停止は Core0 の task1 側で Ctrl-D により別ルートで扱う (この中では stop_flg を見ない)
 //   - 切替はビルド時に USE_EMU_LOOP_ASM=0/1 で。ASM=1 の時は下の asm() が実体を提供。
 // ============================================================
-__attribute__((naked, noreturn, __time_critical__))
-void emu_loop(void) {
-  __asm__ volatile (
-    ".syntax unified\n"
-    ".thumb\n"
-    // C ABI に従い使用レジスタを退避 (r3 も含むのはコンパイラ生成に合わせた)
-    "stmdb   sp!, {r3, r4, r5, r6, r7, r8, r9, sl, fp, lr}\n"
-    "movs    r4, #1\n"
-    "ldr     r3, =sm_emu\n"              // sm_emu (現在は1固定) のアドレス取得
-    "ldr     r1, =0x50200010\n"          // PIO0 TX FIFO ベース (sm 調整前)。txf[0] = 0x50200010
-    "ldr     r3, [r3]\n"                 // r3 = sm_emu の値 (1)
-    "ldr     r9, =memory\n"              // r9 = Z80 エミュレーション用 64KB メモリ先頭 (&memory[0])
-    "lsls    r6, r3, #2\n"               // r6 = sm * 4  (バイトオフセット計算用)
-    "adds    r1, r6\n"                   // r1 = &txf[sm]   ここが Z80 への応答データ書込み先
-    "adds    r3, #8\n"                   // r3 = sm + 8    → fstat の RXEMPTY ビット位置 (LSB=8 + sm)
-    "add.w   r6, r6, #0x50000000\n"
-    "ldr.w   sl, =clk_pwm_slice_num\n"   // I/O パスで「今どの PWM スライスで CLK を出しているか」を得るためのポインタ
-    "ldr.w   r5, =0x50200000\n"          // r5 = PIO0 レジスタベース (fstat は +4)
-    "ldr.w   r8, =0x400ab000\n"          // r8 = PWM ペリフェラル CLR エイリアスベース (原子クリア)
-    "ldr     r7, =0x400aa000\n"          // r7 = PWM ペリフェラル SET エイリアスベース (原子セット)
-    "add.w   r6, r6, #0x200020\n"        // r6 = 0x50200020 + (sm*4)  → &rxf[sm]  (Z80から来る addr+data+busstate の受信元)
-    "lsls    r4, r3\n"                   // r4 = 1 << (sm+8)   これが RXEMPTY 検出マスクになる
 
-    // ========================================================
-    //  メインループ (超ホットパス)
-    //   - PIO RX FIFO が空なら fstat ポーリングで待つ
-    //   - 1 回受信したら即アドレス・バス状態をデコード
-    // ========================================================
+// --- Main Emulation Loop ---
+// プロトタイプ宣言（C 側から multicore_launch_core1(emu_loop) を呼ぶために必要。
+// ASM版使用時もこの宣言でコンパイラは満足し、実際の定義は下の asm() が提供する）
+void emu_loop(void);
+asm(
+  ".syntax unified\n"                        // 統一アセンブリ構文 (Thumb-2 命令も使用可能)
+  ".thumb\n"                                 // Thumb モードでアセンブル
+  ".section .time_critical.emu_loop,\"ax\",%progbits\n"  // C版 __time_critical_func と同等のセクションに配置（copy_to_ram 対象）
+  ".balign 4\n"                              // 4バイト境界にアライン（命令フェッチ効率化）
+  ".thumb_func\n"                            // Thumb 関数であることをリンカに通知
+  ".global emu_loop\n"                       // 外部（main や multicore）から参照可能にする
+  ".type   emu_loop, %function\n"            // シンボルを関数として定義（サイズ情報なども付与）
+"emu_loop:\n"                                // emu_loop 関数のエントリポイント（ここから実行開始）
+  "    stmdb   sp!, {r3, r4, r5, r6, r7, r8, r9, sl, fp, lr}\n"  // C ABI に従い使用レジスタを退避 (r3 も含むのはコンパイラ生成に合わせた)
+  "    movs    r4, #1\n"                                          // r4 = 1 (後でマスク作成用)
+  "    ldr     r3, =sm_emu\n"              // sm_emu (現在は1固定) のアドレス取得
+  "    ldr     r1, =0x50200010\n"          // PIO0 TX FIFO ベース (sm調整前)。txf[0] = 0x50200010
+  "    ldr     r3, [r3]\n"                 // r3 = sm_emu の値 (1)
+  "    ldr.w   r9, =memory\n"              // r9 = Z80 エミュレーション用 64KB メモリ先頭 (&memory[0])
+  "    lsls    r6, r3, #2\n"               // r6 = sm * 4  (バイトオフセット計算用)
+  "    add     r1, r6\n"                   // r1 = &txf[sm]   ここが Z80 への応答データ書込み先
+  "    adds    r3, #8\n"                   // r3 = sm + 8    → fstat の RXEMPTY ビット位置 (LSB=8 + sm)
+  "    add.w   r6, r6, #0x50000000\n"      // r6 に PIO0 ベース (0x50000000) を加算（後の +0x200020 で rxf[sm] ベース 0x50200020 + sm*4 になる）
+  "    ldr.w   sl, =clk_pwm_slice_num\n"   // I/O パスで「今どの PWM スライスで CLK を出しているか」を得るためのポインタ
+  "    ldr     r5, =0x50200000\n"          // r5 = PIO0 レジスタベース (fstat は +4)
+  "    ldr.w   r8, =0x400ab000\n"          // r8 = PWM ペリフェラル CLR エイリアスベース (原子クリア)
+  "    ldr     r7, =0x400aa000\n"          // r7 = PWM ペリフェラル SET エイリアスベース (原子セット)
+  "    add.w   r6, r6, #0x200020\n"        // r6 = 0x50200020 + (sm*4)  → &rxf[sm]  (Z80から来る addr+data+busstate の受信元)
+  "    lsls    r4, r3\n"                   // r4 = 1 << (sm+8)   これが RXEMPTY 検出マスクになる
+
+  // ========================================================
+  //  メインループ (超ホットパス)
+  //   - PIO RX FIFO が空なら fstat ポーリングで待つ
+  //   - 1 回受信したら即アドレス・バス状態をデコード
+  //   - C版 -O3 出力と同一のタイトな bne 構造を再現
+  // ========================================================
 "1:\n"                                   // poll_loop (ローカルラベル)
-    "ldr     r3, [r5, #4]\n"             // r3 = pio0->fstat
-    "tst     r3, r4\n"                   // RXEMPTY ビットが立っているか？
-    "bne.n   1b\n"                       // 立っていればまだデータなし → 即ループ (2命令の超軽量ポーリング)
+  "    ldr     r3, [r5, #4]\n"             // r3 = pio0->fstat
+  "    tst     r3, r4\n"                   // RXEMPTY ビットが立っているか？
+  "    bne.n   1b\n"                       // 立っていればまだデータなし → 即ループ (2命令の超軽量ポーリング)
 
-    "ldr     r0, [r6]\n"     // agpio = *rxf[sm] (32bit一括) [15:0]=A0-15, [23:16]=D0-7(ライト時有効),[26]=WR#,[24]=MREQ#
-    "and.w   r3, r0, #0x05000000\n"      // bus_state = agpio & 0x05000000 (MREQ|WR の 2bit のみ抽出)
-    "cmp.w   r3, #0x04000000\n"          // 0x04000000 == (MREQ=0, WR=1) → Memory Read
-    "uxth    r2, r0\n"                   // r2 = アドレス (下位16bitをゼロ拡張で取り出し)
-    "bne.n   2f\n"                       // Read でなければ分岐
-    
-    // ---- Memory Read (最もホットな直線パス) ----
-    "ldrb    r3, [r9, r2]\n"             // r3 = memory[address]   8bit ロード
-    "str     r3, [r1]\n"                 // *txf[sm] = data        PIO経由で Z80 データバスへ出力
-    "b.n     1b\n"
+  "    ldr     r0, [r6]\n"                 // agpio = *rxf[sm] (32bit一括) [15:0]=A0-15, [23:16]=D0-7(ライト時有効),[26]=WR#,[24]=MREQ#
+  "    and.w   r3, r0, #0x05000000\n"      // bus_state = agpio & 0x05000000 (MREQ|WR の 2bit のみ抽出)
+  "    cmp.w   r3, #0x04000000\n"          // 0x04000000 == (MREQ=0, WR=1) → Memory Read
+  "    uxth    r2, r0\n"                   // r2 = アドレス (下位16bitをゼロ拡張で取り出し)
+  "    bne.n   2f\n"                       // Read でなければ分岐
+
+  // ---- Memory Read (最もホットな直線パス) ----
+  "    ldrb.w  r3, [r9, r2]\n"             // r3 = memory[address]   8bit ロード
+  "    str     r3, [r1]\n"                 // *txf[sm] = data        PIO経由で Z80 データバスへ出力
+  "    b.n     1b\n"                       // メモリリード完了 → 即座に poll ループへ戻る（最速直線パスを維持）
 
 "2:\n"
-    "mov.w   ip, r0, lsr #16\n"          // ip = (agpio >> 16) & 0xff   ライトデータを取り出し
-    "cbnz    r3, 3f\n"                   // bus_state 抽出結果(r3)が 0 でなければ I/O アクセス
+  "    mov.w   ip, r0, lsr #16\n"          // ip = (agpio >> 16) & 0xff   ライトデータを取り出し
+  "    cbnz    r3, 3f\n"                   // bus_state 抽出結果(r3)が 0 でなければ I/O アクセス
 
-    // ---- Memory Write ----
-    "strb    ip, [r9, r2]\n"             // memory[address] = data
-    "b.n     1b\n"
+  // ---- Memory Write ----
+  "    strb.w  ip, [r9, r2]\n"             // memory[address] = data
+  "    b.n     1b\n"
 
 "3:\n" // ---- I/O Read/Write ----
        //   ここに来るのは低頻度。クロックを止めて C の handle_io を呼ぶ
-    "mov.w   fp, #1\n"                   // PWM 直接操作を再現(インライン展開された clk_pwm_output_off/on)
-    "ldr.w   r3, [sl]\n"                 // r3 = clk_pwm_slice_num の現在値
-    "lsl.w   fp, fp, r3\n"               // fp = (1 << slice_num)
-    "str.w   fp, [r8, #0xf0]\n"          // PWM->en の CLR エイリアスへ書込み → 指定ビットだけ即時クリア (CLK 停止)
-    
-    "bl      handle_io\n"                // handle_io(agpio in r0, txf in r1) 呼び出し規約により r0/r1を引数として渡せる
+  "    mov.w   fp, #1\n"                   // PWM 直接操作を再現(インライン展開された clk_pwm_output_off/on)
+  "    ldr.w   r3, [sl]\n"                 // r3 = clk_pwm_slice_num の現在値
+  "    lsl.w   fp, fp, r3\n"               // fp = (1 << slice_num)
+  "    str.w   fp, [r8, #0xf0]\n"          // PWM->en の CLR エイリアスへ書込み → 指定ビットだけ即時クリア (CLK 停止)
+  
+  "    bl      handle_io\n"                // handle_io(agpio in r0, txf in r1) 呼び出し規約により r0/r1を引数として渡せる
    
-    "str.w   fp, [r7, #0xf0]\n"          // PWM->en の SET エイリアスへ書込み → ビットセット (CLK 再開)
-    "b.n     1b\n"
+  "    str.w   fp, [r7, #0xf0]\n"          // PWM->en の SET エイリアスへ書込み → ビットセット (CLK 再開)
+  "    b.n     1b\n"
 
-    : /* no outputs */
-    : /* none */
-    : "cc", "memory", "r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7", 
-      "r8", "r9", "sl", "fp", "ip", "lr"
-  );
-}
+  ".size emu_loop, . - emu_loop\n"
+  ".ltorg\n"
+);
+
 #else
 // ============================================================
-// オリジナル C 版 emu_loop (USE_EMU_LOOP_ASM == 0 のとき)
-//   - ロジックが明確
-//   - PIO FIFO ポーリング + Memory R/W 最速化 + I/O 時はクロック停止
-//   - handle_io は noinline でレジスタを圧迫しない
+// オリジナル C 版 emu_loop() Z80バス・エミュレーション
 // ============================================================
 void __time_critical_func(emu_loop)(void) {
   // PIO レジスタ・マスク・ポインタをキャッシュ（ループ外で1回だけ）
   uint8_t *const mem_ptr = memory;
   const uint32_t rxempty_mask = (1u << (PIO_FSTAT_RXEMPTY_LSB + sm_emu));
-
+  // PIO FIFO
   volatile uint32_t *const rxf = (volatile uint32_t *)&pio0_hw->rxf[sm_emu];
   volatile uint32_t *const txf = (volatile uint32_t *)&pio0_hw->txf[sm_emu];
 
-  // MREQ(24) と WR(26) のビットだけを抽出するマスク
+  // Z80 MREQ(24) と WR(26) のビットだけを抽出するマスク
   const uint32_t bus_mask      = (1u << MREQ_PIN) | (1u << WR_PIN);
   const uint32_t mem_read_state  = (1u << WR_PIN); // MREQ=0, WR=1
   const uint32_t mem_write_state = 0u;              // MREQ=0, WR=0
 
   while (true) {
-    // PIOのRX FIFOからデータを取得する(ブロッキング)
+    // PIOのRX FIFOからバスの状態を取得する(Z80 RD又はWR有効時、ブロッキング)
     while (pio0_hw->fstat & rxempty_mask) {
       tight_loop_contents();
     }
-    uint32_t agpio = *rxf;
+    uint32_t agpio = *rxf;      // agpio = address[15:0], data[7:0], MREQ[24],WR[26]
     uint32_t adrs_word = (agpio & 0xFFFF);
     uint32_t bus_state = agpio & bus_mask;
 
-    // Memory-Read を最速の直線パスにする (最頻出)
+    // Z80 Memory-Read を最速の直線パスにする (最頻出)
     if (__builtin_expect(bus_state == mem_read_state, 1)) {
-      *txf = mem_ptr[adrs_word]; // Memory-Read
+      *txf = mem_ptr[adrs_word]; // Z80 Memory-Read
     } else if (bus_state == mem_write_state) {
-      mem_ptr[adrs_word] = (uint8_t)(agpio >> DATA_BASE); // Memory-Write
-    } else {   // MREQ=1  I/Oアクセス
+      mem_ptr[adrs_word] = (uint8_t)(agpio >> DATA_BASE); // Z80 Memory-Write
+    } else {   // MREQ=1 - Z80 I/Oアクセス
       clk_pwm_output_off();   // Z80クロック停止 (inline)
-      handle_io(agpio, txf);
+      handle_io(agpio, txf);  // Z80 I/Oアクセス処理
       clk_pwm_output_on();    // Z80クロック再開 (inline)
     }
   }
@@ -508,9 +516,9 @@ int main() {
   multicore_launch_core1(emu_loop);
   sleep_ms(0);
 
-  // CLK PWM Setup, RP2350 400MHz Z80 16MHz, 360MHz Z80 12MHz, 150MHz Z80 6MHz
+  // CLK PWM Setup, RP2350 400MHz Z80 17MHz, 360MHz Z80 12MHz, 150MHz Z80 6MHz
   // int Z80_freq = 18000000; // 17MHz
-   int Z80_freq = 17000000; // 17MHz
+  // int Z80_freq = 17000000; // 17MHz
   // int Z80_freq = 16000000; // 16MHz
   // int Z80_freq = 15000000; // 15MHz
   // int Z80_freq = 14000000; // 14MHz
@@ -520,13 +528,14 @@ int main() {
   // int Z80_freq = 9000000; // 9MHz
   // int Z80_freq = 8000000; // 8MHz
   // int Z80_freq = 7000000; // 7MHz
-  // int Z80_freq = 6000000; // 6MHz
+  int Z80_freq = 6000000; // 6MHz
   // int Z80_freq = 4000000; // 4MHz
   // int Z80_freq = 2500000; // 2.5MHz
   // int Z80_freq = 20; // 20Hz
-  gpio_set_function(CLK_PIN, GPIO_FUNC_PWM);
-  uint slice_num = pwm_gpio_to_slice_num(CLK_PIN);
-//  set_pwm_freq(CLK_PIN, Z80_freq);
+
+  // gpio_set_function(CLK_PIN, GPIO_FUNC_PWM);
+  //  uint slice_num = pwm_gpio_to_slice_num(CLK_PIN);
+  //  set_pwm_freq(CLK_PIN, Z80_freq);
   init_clk_pwm(Z80_freq);
   // pwm_set_enabled(slice_num, true);
   printf("Z80 CLK-ON %fMHz\n", Z80_freq / 1000000.0);
@@ -541,7 +550,8 @@ int main() {
   gpio_put(RESET_PIN, 0);
   printf("RESET-ON\n");
   sleep_ms(100);
-  pwm_set_enabled(slice_num, false);
+  // pwm_set_enabled(slice_num, false);
+  clk_pwm_output_off();
   clk_on_off(10);
   printf("Exited.\n");
 
