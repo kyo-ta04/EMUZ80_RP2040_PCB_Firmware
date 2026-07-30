@@ -168,8 +168,13 @@ EMUZ80_RP2040_PCB_Firmware/
 HI-TECH-C Z80 実行例
 ![img9](./img/img9.png)
 
-### 回路図
-![img3](./img/img3.jpg)
+### 接続図
+![接続図](./img/img3.jpg)
+
+### EMUZ80_RP2040_PCB 全体回路図
+![回路図](./img/img5.png)
+
+
 ### 基板裏面
 ![img4](./img/img4.jpg)
 ** BUSRQ,INT,NMI,WAITはプルアップ、RESETの LEDもジャンパで接続 **
