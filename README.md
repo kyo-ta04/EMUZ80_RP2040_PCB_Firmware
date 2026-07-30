@@ -81,8 +81,10 @@ Raspberry Pi 公式のデータシートでは、GPIO 入力電圧の絶対最�
 ## ギャラリー
 ### 実行結果
 ![img2](./img/img2.jpg)
-### 回路図
+### 接続図
 ![img3](./img/img3.jpg)
+### EMUZ80_RP2040_PCB 全体回路図
+![img5](./img/img5.png)
 ### 基板裏面
 ![img4](./img/img4.jpg)
 ** BUSRQ,INT,NMI,WAITはプルアップ、RESETの LEDもジャンパで接続 **
